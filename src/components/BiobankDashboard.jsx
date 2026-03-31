@@ -42,16 +42,28 @@ function SampleBar({ collected, total }) {
   );
 }
 
-export default function BiobankDashboard({ patients, flaggedPatients, studies, onNavigate, onImportWorkbook, onLoadDemo }) {
+export default function BiobankDashboard({ patients, flaggedPatients, recontactCases, studies, onNavigate, onImportWorkbook, onLoadDemo }) {
   const studyList = useMemo(() => Object.values(studies).sort((a, b) => a.id.localeCompare(b.id)), [studies]);
+
+  // flagged = patients with an active recontact event in 'flagged' stage
+  const activeFlaggedByStudy = useMemo(() => {
+    const byStudy = {};
+    for (const p of flaggedPatients) {
+      const stage = recontactCases[p.id]?.stage;
+      if (stage === 'flagged') {
+        byStudy[p.studyId] = (byStudy[p.studyId] ?? 0) + 1;
+      }
+    }
+    return byStudy;
+  }, [flaggedPatients, recontactCases]);
 
   const stats = useMemo(() => {
     const total     = patients.length;
     const collected = patients.filter(p => p.sampleCollected).length;
     const genotyped = patients.filter(p => p.genotypingComplete).length;
-    const flagged   = flaggedPatients.length;
+    const flagged   = Object.values(activeFlaggedByStudy).reduce((s, n) => s + n, 0);
     return { total, collected, genotyped, flagged };
-  }, [patients, flaggedPatients]);
+  }, [patients, activeFlaggedByStudy]);
 
   // Per-study stats
   const studyStats = useMemo(() => {
@@ -62,10 +74,10 @@ export default function BiobankDashboard({ patients, flaggedPatients, studies, o
       out[p.studyId].total++;
       if (p.sampleCollected)    out[p.studyId].collected++;
       if (p.genotypingComplete) out[p.studyId].genotyped++;
-      if (p.flagged)            out[p.studyId].flagged++;
+      out[p.studyId].flagged = activeFlaggedByStudy[p.studyId] ?? 0;
     }
     return out;
-  }, [patients]);
+  }, [patients, activeFlaggedByStudy]);
 
   if (studyList.length === 0) {
     return (

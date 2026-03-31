@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import {
   LayoutDashboard, AlertTriangle, GitMerge, Menu, X, Dna,
-  ChevronDown, ChevronRight, Database,
+  ChevronDown, ChevronRight, Database, LogOut, BookOpen,
 } from 'lucide-react';
 import { getCategoryStyle } from '../data/studyCategories';
 import useAppStore from '../store/appStore';
+import { signOut } from '../services/dataService';
 
 const BIOBANK_NAV = [
   { key: 'dashboard', label: 'Biobank Overview',      Icon: LayoutDashboard },
   { key: 'master',    label: 'All Patients',           Icon: Database },
   { key: 'flagged',   label: 'Flagged for Recontact',  Icon: AlertTriangle },
   { key: 'recontact', label: 'Recontact Workflow',     Icon: GitMerge },
+  { key: 'rules',     label: 'Recontact Rules',        Icon: BookOpen },
 ];
 
 function StudiesSection({ studies, activeScreen, activeStudyId, patientCounts, onNavigate, onClose }) {
@@ -117,12 +119,18 @@ function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, stu
         </div>
       </div>
 
-      {/* Total patients footer */}
-      <div className="px-5 py-4 border-t border-teal-800">
-        <p className="text-xs text-teal-400 font-medium">
+      {/* Footer: studies count + sign out */}
+      <div className="px-4 py-4 border-t border-teal-800 space-y-2">
+        <p className="text-xs text-teal-400 font-medium px-1">
           {Object.values(studies).length} stud{Object.values(studies).length !== 1 ? 'ies' : 'y'} loaded
         </p>
-        <p className="text-xs text-teal-200 mt-0.5">MyAfroDNA Biobank</p>
+        <button
+          onClick={() => signOut()}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-teal-300 hover:bg-teal-800 hover:text-white transition-colors"
+        >
+          <LogOut size={14} />
+          Sign out
+        </button>
       </div>
     </nav>
   );

@@ -91,15 +91,15 @@ export function getRuleForGenotype(genotypeStr) {
 // Apply all rules to a patient object and return enriched patient with flagging info.
 // Manual flags (patient.manualFlag) override auto-classification.
 export function classifyPatient(patient) {
-  // Manual flag takes priority — coordinator explicitly flagged this patient.
+  // 1. Manual flag takes priority
   if (patient.manualFlag) {
-    const mf = patient.manualFlag;
-    const autoRule = getRuleForGenotype(patient.genotype);
+    const mf      = patient.manualFlag;
+    const display = getRuleForGenotype(patient.genotype);
     return {
       ...patient,
-      phenotype:       autoRule?.phenotype    ?? (patient.genotype ? 'Unknown Variant' : null),
-      phenotypeShort:  autoRule?.phenotypeShort ?? null,
-      implication:     autoRule?.implication   ?? null,
+      phenotype:       display?.phenotype      ?? (patient.genotype ? 'Unknown Variant' : null),
+      phenotypeShort:  display?.phenotypeShort ?? null,
+      implication:     display?.implication    ?? null,
       flagged:         true,
       priority:        mf.priority || 'Medium',
       suggestedAction: mf.reason || 'Manually flagged for recontact.',
@@ -107,29 +107,32 @@ export function classifyPatient(patient) {
     };
   }
 
-  const rule = getRuleForGenotype(patient.genotype);
-  if (!rule) {
+  // 2. Rules engine auto-flag (_ruleMatch is set by loadFromSupabase / runRulesForStudy)
+  if (patient._ruleMatch) {
+    const { priority, reason } = patient._ruleMatch;
+    const display = getRuleForGenotype(patient.genotype);
     return {
       ...patient,
-      phenotype: patient.genotype ? 'Unknown Variant' : null,
-      phenotypeShort: null,
-      flagged: false,
-      priority: null,
-      implication: patient.genotype
-        ? 'This genotype is not in the current rules set. Manual review required.'
-        : null,
-      suggestedAction: patient.genotype ? 'Contact study pharmacogenomics team for classification.' : null,
-      flaggedBy: null,
+      phenotype:       display?.phenotype      ?? (patient.genotype ? 'Unknown Variant' : null),
+      phenotypeShort:  display?.phenotypeShort ?? null,
+      implication:     display?.implication    ?? null,
+      flagged:         true,
+      priority:        priority || 'Medium',
+      suggestedAction: reason   || 'Flagged by recontact rule.',
+      flaggedBy:       'auto',
     };
   }
+
+  // 3. Not flagged — still show phenotype info for display
+  const display = getRuleForGenotype(patient.genotype);
   return {
     ...patient,
-    phenotype:       rule.phenotype,
-    phenotypeShort:  rule.phenotypeShort,
-    flagged:         rule.flagged,
-    priority:        rule.priority,
-    implication:     rule.implication,
-    suggestedAction: rule.suggestedAction,
-    flaggedBy:       rule.flagged ? 'auto' : null,
+    phenotype:       display?.phenotype      ?? (patient.genotype ? 'Unknown Variant' : null),
+    phenotypeShort:  display?.phenotypeShort ?? null,
+    implication:     display?.implication    ?? (patient.genotype ? 'Not in current rules set. Manual review required.' : null),
+    flagged:         false,
+    priority:        null,
+    suggestedAction: display?.suggestedAction ?? (patient.genotype ? 'Contact study pharmacogenomics team for classification.' : null),
+    flaggedBy:       null,
   };
 }

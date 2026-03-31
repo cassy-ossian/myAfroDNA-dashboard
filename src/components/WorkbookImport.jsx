@@ -281,10 +281,12 @@ export default function WorkbookImport({ onClose, onImported }) {
           };
         });
 
-      await importFullWorkbook(studiesData);
+      const ruleResults = await importFullWorkbook(studiesData);
 
       const totalPatients = studiesData.reduce((n, s) => n + s.rows.length, 0);
-      setImportResult({ studies: studiesData.length, patients: totalPatients });
+      const newlyFlagged = Object.values(ruleResults ?? {}).reduce((sum, r) => sum + (r?.newlyFlagged ?? 0), 0);
+      const studiesWithRules = Object.values(ruleResults ?? {}).filter(r => (r?.newlyFlagged ?? 0) + (r?.alreadyFlagged ?? 0) + (r?.noMatch ?? 0) > 0).length;
+      setImportResult({ studies: studiesData.length, patients: totalPatients, newlyFlagged, studiesWithRules });
       setStep(4);
       onImported?.();
     } catch (err) {
@@ -371,6 +373,16 @@ export default function WorkbookImport({ onClose, onImported }) {
                 <p className="text-gray-500 text-sm mt-1">
                   {importResult.studies} stud{importResult.studies !== 1 ? 'ies' : 'y'} · {importResult.patients} participants loaded
                 </p>
+                {importResult.newlyFlagged > 0 && (
+                  <p className="text-sm text-teal-700 font-medium mt-1">
+                    Auto-flagging: {importResult.newlyFlagged} patient{importResult.newlyFlagged !== 1 ? 's' : ''} flagged for recontact
+                  </p>
+                )}
+                {importResult.studiesWithRules === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    No recontact rules are configured. Visit the Rules page to add auto-flagging rules.
+                  </p>
+                )}
               </div>
               <button
                 onClick={onClose}

@@ -1,5 +1,6 @@
-import { useState, useMemo, useCallback } from 'react';
-import { Search, ChevronUp, ChevronDown, AlertTriangle, Dna, Phone } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { Search, ChevronUp, ChevronDown, AlertTriangle, Dna, Phone, BookOpen, Play, Settings, Loader2 } from 'lucide-react';
+import { getRulesForStudy, runRulesForStudy } from '../services/rulesEngine';
 import StudyBadge from './StudyBadge';
 import PathwayBadge from './PathwayBadge';
 import BatchActionBar from './BatchActionBar';
@@ -60,7 +61,96 @@ function CellValue({ field, value, patient }) {
   return <span className="text-gray-700">{String(value)}</span>;
 }
 
-export default function StudyView({ study, patients, studies, providers, onSelectPatient }) {
+function RulesSummary({ studyId, onManageRules }) {
+  const [rules,        setRules]        = useState([]);
+  const [open,         setOpen]         = useState(true);
+  const [running,      setRunning]      = useState(false);
+  const [runResult,    setRunResult]    = useState(null);
+
+  useEffect(() => {
+    if (!studyId) return;
+    getRulesForStudy(studyId).then(setRules);
+  }, [studyId]);
+
+  const activeRules = rules.filter(r => r.is_active);
+
+  const handleRun = async (e) => {
+    e.stopPropagation();
+    setRunning(true);
+    setRunResult(null);
+    const result = await runRulesForStudy(studyId);
+    setRunResult(result);
+    setRunning(false);
+  };
+
+  if (rules.length === 0) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm text-amber-700">
+          <AlertTriangle size={14} className="shrink-0" />
+          No recontact rules configured for this study.
+        </div>
+        <button onClick={onManageRules}
+          className="text-xs text-amber-700 font-semibold hover:underline shrink-0">
+          Add Rule
+        </button>
+      </div>
+    );
+  }
+
+  const OPERATOR_SHORT = { eq: '=', neq: '≠', contains: '~', gt: '>', lt: '<', in: 'in', not_empty: '≠∅', is_empty: '=∅' };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
+        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+          <BookOpen size={14} className="text-teal-600" />
+          Recontact Rules
+          <span className="text-xs font-normal text-gray-400">({activeRules.length} active)</span>
+        </div>
+        <ChevronDown size={14} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-3 border-t border-gray-100">
+          <div className="mt-3 space-y-1.5">
+            {activeRules.map(r => (
+              <div key={r.id} className="flex items-center gap-2 text-xs text-gray-600">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${r.priority === 'High' ? 'bg-red-500' : 'bg-amber-400'}`} />
+                <span className="font-mono text-gray-700">{r.column_name}</span>
+                <span className="text-gray-400">{OPERATOR_SHORT[r.operator] ?? r.operator}</span>
+                {r.value && <span className="font-mono text-teal-700">{r.value}</span>}
+                <span className="text-gray-400">→</span>
+                <span className={`font-semibold ${r.priority === 'High' ? 'text-red-600' : 'text-amber-600'}`}>{r.priority}</span>
+              </div>
+            ))}
+            {rules.filter(r => !r.is_active).length > 0 && (
+              <p className="text-xs text-gray-400 mt-1">{rules.filter(r => !r.is_active).length} inactive rule{rules.filter(r => !r.is_active).length !== 1 ? 's' : ''} hidden</p>
+            )}
+          </div>
+          {runResult && (
+            <div className="text-xs text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-3 py-2">
+              Evaluated {runResult.newlyFlagged + runResult.alreadyFlagged + runResult.noMatch} patients —{' '}
+              <strong>{runResult.newlyFlagged}</strong> newly flagged, <strong>{runResult.alreadyFlagged}</strong> already flagged.
+            </div>
+          )}
+          <div className="flex items-center gap-2 pt-1">
+            <button onClick={handleRun} disabled={running || activeRules.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-700 text-white rounded-lg text-xs font-semibold hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+              {running ? <><Loader2 size={11} className="animate-spin" /> Running…</> : <><Play size={11} /> Run Rules Now</>}
+            </button>
+            <button onClick={onManageRules}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors">
+              <Settings size={11} /> Manage Rules
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function StudyView({ study, patients, studies, providers, onSelectPatient, onNavigate }) {
   const [search,    setSearch]    = useState('');
   const [sort,      setSort]      = useState({ field: 'enrollmentDate', dir: 'desc' });
   const [page,      setPage]      = useState(1);
@@ -160,6 +250,14 @@ export default function StudyView({ study, patients, studies, providers, onSelec
           </div>
         ))}
       </div>
+
+      {/* Rules summary */}
+      {study && (
+        <RulesSummary
+          studyId={study.id}
+          onManageRules={() => onNavigate?.('rules')}
+        />
+      )}
 
       {/* Search */}
       <div className="relative max-w-sm">
