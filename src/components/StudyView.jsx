@@ -1,11 +1,13 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Search, ChevronUp, ChevronDown, AlertTriangle, Dna, Phone, BookOpen, Play, Settings, Loader2 } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, AlertTriangle, Dna, Phone, BookOpen, Play, Settings, Loader2, Download } from 'lucide-react';
 import { getRulesForStudy, runRulesForStudy } from '../services/rulesEngine';
 import StudyBadge from './StudyBadge';
 import PathwayBadge from './PathwayBadge';
 import BatchActionBar from './BatchActionBar';
 import FlagForRecontactModal from './FlagForRecontactModal';
 import { manuallyFlagPatients, bulkAssignProvider } from '../services/dataService';
+import { exportPatientList } from '../utils/excelExport';
+import useAppStore from '../store/appStore';
 
 const HIDDEN_COLS = new Set(['studyId','contactPathway','flagged','priority','phenotype',
   'implication','suggestedAction','flaggedBy','contactDetails','manualFlag']);
@@ -157,6 +159,9 @@ export default function StudyView({ study, patients, studies, providers, onSelec
   const [selected,  setSelected]  = useState(new Set());
   const [flagModal, setFlagModal] = useState(false);
 
+  const recontactCases      = useAppStore(s => s.recontactCases);
+  const providerAssignments = useAppStore(s => s.providerAssignments);
+
   const columns = useMemo(() => {
     if (study?.headers?.length) return study.headers.filter(h => !HIDDEN_COLS.has(h));
     if (patients.length === 0) return ['id'];
@@ -230,9 +235,27 @@ export default function StudyView({ study, patients, studies, providers, onSelec
           <h1 className="text-2xl font-bold text-gray-900 mt-1">{study.name}</h1>
           <p className="text-gray-500 text-sm mt-1">{study.description}</p>
         </div>
-        <div className="text-right shrink-0">
-          <p className="text-3xl font-bold text-gray-900">{patients.length}</p>
-          <p className="text-xs text-gray-400 mt-0.5">participants</p>
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <div className="text-right">
+            <p className="text-3xl font-bold text-gray-900">{patients.length}</p>
+            <p className="text-xs text-gray-400 mt-0.5">participants</p>
+          </div>
+          {filtered.length > 0 && (
+            <button
+              onClick={() => {
+                const dateStr = new Date().toISOString().split('T')[0];
+                exportPatientList(filtered, {
+                  filename: `MyAfroDNA_${(study.shortName || study.id).replace(/[^a-zA-Z0-9]/g, '_')}Export${dateStr}.xlsx`,
+                  recontactCases,
+                  providerAssignments,
+                  studyHeaders: study.headers ?? null,
+                  includeStudyCol: false,
+                });
+              }}
+              className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+              <Download size={14} /> Export to Excel
+            </button>
+          )}
         </div>
       </div>
 

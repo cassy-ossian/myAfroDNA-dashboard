@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
-import { Users, AlertTriangle, Dna, FlaskConical, ChevronRight, Database, Upload } from 'lucide-react';
+import { Users, AlertTriangle, Dna, FlaskConical, ChevronRight, Database, Upload, Download } from 'lucide-react';
 import { getCategoryStyle } from '../data/studyCategories';
 import StudyBadge from './StudyBadge';
+import useAppStore from '../store/appStore';
+import { exportAllStudiesWorkbook } from '../utils/excelExport';
 
 function StatCard({ label, value, sub, Icon, color = 'teal', onClick }) {
   const colors = {
@@ -44,6 +46,7 @@ function SampleBar({ collected, total }) {
 
 export default function BiobankDashboard({ patients, flaggedPatients, recontactCases, studies, onNavigate, onImportWorkbook, onLoadDemo }) {
   const studyList = useMemo(() => Object.values(studies).sort((a, b) => a.id.localeCompare(b.id)), [studies]);
+  const providerAssignments = useAppStore(s => s.providerAssignments);
 
   // flagged = patients with an active recontact event in 'flagged' stage
   const activeFlaggedByStudy = useMemo(() => {
@@ -119,11 +122,18 @@ export default function BiobankDashboard({ patients, flaggedPatients, recontactC
             {studyList.length} stud{studyList.length !== 1 ? 'ies' : 'y'} · {stats.total} participants enrolled
           </p>
         </div>
-        {onImportWorkbook && (
-          <button onClick={onImportWorkbook} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors shrink-0">
-            <Upload size={14} /> Import Workbook
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => exportAllStudiesWorkbook(patients, { studies, recontactCases, providerAssignments })}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+            <Download size={14} /> Export All Data
           </button>
-        )}
+          {onImportWorkbook && (
+            <button onClick={onImportWorkbook} className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+              <Upload size={14} /> Import Workbook
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Summary stats */}

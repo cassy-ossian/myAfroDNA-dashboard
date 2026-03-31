@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Search, ChevronUp, ChevronDown, AlertTriangle } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, AlertTriangle, Download } from 'lucide-react';
 import StudyBadge from './StudyBadge';
 import PathwayBadge from './PathwayBadge';
 import BatchActionBar from './BatchActionBar';
@@ -7,7 +7,7 @@ import FlagForRecontactModal from './FlagForRecontactModal';
 import ColumnManager, { getColumnLabel } from './ColumnManager';
 import useAppStore from '../store/appStore';
 import { manuallyFlagPatients, bulkAssignProvider, setVisibleColumns } from '../services/dataService';
-import { exportExcel } from '../utils/excelExport';
+import { exportExcel, exportPatientList } from '../utils/excelExport';
 
 const PAGE_SIZE = 50;
 
@@ -48,9 +48,10 @@ function LastActivityCell({ ts }) {
 }
 
 export default function MasterPatientList({ patients, studies, providers, onSelectPatient }) {
-  const recontactCases = useAppStore(s => s.recontactCases);
-  const patientNotes   = useAppStore(s => s.patientNotes);
-  const storedCols     = useAppStore(s => s.visibleColumns);
+  const recontactCases      = useAppStore(s => s.recontactCases);
+  const patientNotes        = useAppStore(s => s.patientNotes);
+  const storedCols          = useAppStore(s => s.visibleColumns);
+  const providerAssignments = useAppStore(s => s.providerAssignments);
 
   const [search,      setSearch]      = useState('');
   const [studyFilter, setStudyFilter] = useState('');
@@ -164,14 +165,15 @@ export default function MasterPatientList({ patients, studies, providers, onSele
     setSelected(new Set());
   }, []);
 
-  const handleExport = useCallback((selectedPts) => {
-    try {
-      const flagged = selectedPts.filter(p => p.flagged);
-      const all = selectedPts;
-      const groups = [{ label: 'Selected Patients', patients: flagged.length ? flagged : all }];
-      exportExcel({ groups, grouping: 'priority', customNote: '', reportDate: new Date().toISOString(), providers, providerAssignments: {} });
-    } catch (e) { console.error('Export failed', e); }
-  }, [providers]);
+  const handleExport = useCallback(() => {
+    const dateStr = new Date().toISOString().split('T')[0];
+    exportPatientList(filtered, {
+      filename: `MyAfroDNA_Full_Export_${dateStr}.xlsx`,
+      recontactCases,
+      providerAssignments,
+      includeStudyCol: true,
+    });
+  }, [filtered, recontactCases, providerAssignments]);
 
   const Th = ({ field, label, className = '' }) => (
     <th onClick={() => toggleSort(field)}
@@ -183,12 +185,20 @@ export default function MasterPatientList({ patients, studies, providers, onSele
   return (
     <div className="p-4 md:p-8 space-y-5 pb-4">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">All Patients</h1>
-        <p className="text-gray-500 text-sm mt-1">
-          {patients.length} participant{patients.length !== 1 ? 's' : ''} across {studyList.length} stud{studyList.length !== 1 ? 'ies' : 'y'}
-          {filtered.length !== patients.length && ` · ${filtered.length} shown`}
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">All Patients</h1>
+          <p className="text-gray-500 text-sm mt-1">
+            {patients.length} participant{patients.length !== 1 ? 's' : ''} across {studyList.length} stud{studyList.length !== 1 ? 'ies' : 'y'}
+            {filtered.length !== patients.length && ` · ${filtered.length} shown`}
+          </p>
+        </div>
+        {filtered.length > 0 && (
+          <button onClick={handleExport}
+            className="flex items-center gap-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors shrink-0">
+            <Download size={14} /> Export to Excel
+          </button>
+        )}
       </div>
 
       {/* Filters + column manager */}
@@ -304,7 +314,15 @@ export default function MasterPatientList({ patients, studies, providers, onSele
         providers={providers}
         onFlag={handleFlag}
         onAssignProvider={(ids, name) => handleBulkAssign(ids, name)}
-        onExport={handleExport}
+        onExport={(selectedPts) => {
+          const dateStr = new Date().toISOString().split('T')[0];
+          exportPatientList(selectedPts, {
+            filename: `MyAfroDNA_Full_Export_${dateStr}.xlsx`,
+            recontactCases,
+            providerAssignments,
+            includeStudyCol: true,
+          });
+        }}
         onClear={() => setSelected(new Set())}
       />
 

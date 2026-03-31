@@ -348,3 +348,184 @@ export function exportExcel({ groups, grouping, customNote, reportDate, provider
 
   XLSXStyle.writeFile(wb, `MyAfroDNA_Recontact_Report_${namePart}_${dateStr}.xlsx`);
 }
+
+// ── Shared skip sets ──────────────────────────────────────────────────────────
+
+const EXPORT_SKIP = new Set([
+  '_sbId', '_ruleMatch', 'manualFlag', 'contactDetails',
+  'flagged', 'flaggedBy', 'priority',
+  'sex', // unified into Gender column
+]);
+
+const COMMON_KEYS = new Set([
+  'id', 'studyId', 'age', 'gender', 'lga', 'tribe',
+  'language', 'contactPathway', 'phone', 'email',
+]);
+
+// ── Flat patient table builder ────────────────────────────────────────────────
+
+function buildPatientSheet(patients, studyKeys, recontactCases, providerAssignments, includeStudyCol) {
+  const ws = {};
+
+  const commonCols = includeStudyCol
+    ? ['id', 'studyId', 'age', 'gender', 'lga', 'tribe', 'language', 'contactPathway', 'phone', 'email']
+    : ['id',           'age', 'gender', 'lga', 'tribe', 'language', 'contactPathway', 'phone', 'email'];
+
+  const LABELS = {
+    id: 'MyAfroDNA ID', studyId: 'Study', age: 'Age', gender: 'Gender',
+    lga: 'LGA', tribe: 'Tribe', language: 'Language',
+    contactPathway: 'Contact Pathway', phone: 'Phone', email: 'Email',
+  };
+
+  const headers = [
+    ...commonCols.map(k => LABELS[k] ?? k),
+    'Assigned Provider',
+    'Flagged', 'Priority', 'Flag Reason', 'Recontact Stage', 'Last Activity',
+    ...studyKeys,
+  ];
+
+  // Header row
+  headers.forEach((h, c) =>
+    cell(ws, 0, c, h, s({ bold: true, bg: C.thBg, fg: C.thFg, border: true }))
+  );
+
+  // Data rows
+  patients.forEach((p, i) => {
+    const rowBg = i % 2 === 1 ? C.altRow : undefined;
+    const rc = recontactCases[p.id];
+    const lastTs = rc?.history?.at(-1)?.timestamp ?? rc?.stageEnteredAt ?? '';
+
+    const row = [
+      ...commonCols.map(k => {
+        if (k === 'gender') return p.gender ?? p.sex ?? '';
+        const v = p[k];
+        return v == null ? '' : String(v);
+      }),
+      providerAssignments[p.id] ?? '',
+      rc ? 'Yes' : 'No',
+      rc?.priority ?? '',
+      rc?.flagReason ?? p.manualFlag?.reason ?? '',
+      rc?.stage ?? '',
+      lastTs ? lastTs.split('T')[0] : '',
+      ...studyKeys.map(k => {
+        const v = p[k];
+        if (v == null) return '';
+        if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+        return String(v);
+      }),
+    ];
+
+    row.forEach((v, c) => cell(ws, i + 1, c, v, s({ bg: rowBg, border: true })));
+  });
+
+  ws['!ref'] = XLSXStyle.utils.encode_range({
+    s: { r: 0, c: 0 },
+    e: { r: patients.length, c: headers.length - 1 },
+  });
+  ws['!merges'] = [];
+  ws['!cols'] = headers.map(h => ({ wch: Math.max(10, Math.min(32, h.length + 3)) }));
+  return ws;
+}
+
+// ── Public: flat patient list export ─────────────────────────────────────────
+
+export function exportPatientList(patients, {
+  filename,
+  recontactCases = {},
+  providerAssignments = {},
+  studyHeaders = null,
+  includeStudyCol = true,
+}) {
+  const SKIP = new Set([...EXPORT_SKIP, ...COMMON_KEYS]);
+
+  let studyKeys;
+  if (studyHeaders) {
+    studyKeys = studyHeaders.filter(k => !SKIP.has(k) && !k.startsWith('_'));
+  } else {
+    const seen = new Set();
+    for (const p of patients) {
+      for (const k of Object.keys(p)) {
+        if (!SKIP.has(k) && !k.startsWith('_')) seen.add(k);
+      }
+    }
+    studyKeys = [...seen].sort();
+  }
+
+  const ws = buildPatientSheet(patients, studyKeys, recontactCases, providerAssignments, includeStudyCol);
+  const wb = XLSXStyle.utils.book_new();
+  XLSXStyle.utils.book_append_sheet(wb, ws, 'Patients');
+  XLSXStyle.writeFile(wb, filename);
+}
+
+// ── Public: all-studies workbook (Dashboard export) ───────────────────────────
+
+export function exportAllStudiesWorkbook(allPatients, { studies, recontactCases = {}, providerAssignments = {} }) {
+  const wb = XLSXStyle.utils.book_new();
+
+  // Summary sheet
+  const sumWs = {};
+  const sumMrg = [];
+  let r = 0;
+
+  cell(sumWs, r, 0, 'MyAfroDNA — Full Data Export', s({ bold: true, sz: 14, bg: C.titleBg, fg: C.titleFg }));
+  merge(sumMrg, r, 0, r, 6); r++;
+  cell(sumWs, r, 0, `Generated: ${fmtDate(new Date().toISOString())}`, s({ bg: C.titleBg, fg: C.titleFg }));
+  merge(sumMrg, r, 0, r, 6); r++;
+  r++;
+
+  const TH = ['Study ID', 'Study Name', 'Total', 'Flagged', 'Contacted', 'Awaiting Results', 'Counselled / Closed'];
+  TH.forEach((h, c) => cell(sumWs, r, c, h, s({ bold: true, bg: C.thBg, fg: C.thFg, border: true })));
+  r++;
+
+  const STAGES = ['flagged', 'contacted', 'awaiting_results', 'counselled', 'closed'];
+  const totals = { total: 0, flagged: 0, contacted: 0, awaiting_results: 0, counselled: 0, closed: 0 };
+
+  for (const study of Object.values(studies).sort((a, b) => a.id.localeCompare(b.id))) {
+    const pts = allPatients.filter(p => p.studyId === study.id);
+    const counts = { total: pts.length, flagged: 0, contacted: 0, awaiting_results: 0, counselled: 0, closed: 0 };
+    for (const p of pts) {
+      const stage = recontactCases[p.id]?.stage;
+      if (stage && STAGES.includes(stage)) counts[stage]++;
+    }
+    const rowBg = r % 2 === 1 ? C.altRow : undefined;
+    cell(sumWs, r, 0, study.id,   s({ bold: true, border: true }));
+    cell(sumWs, r, 1, study.name, s({ border: true, bg: rowBg }));
+    cell(sumWs, r, 2, counts.total, s({ border: true, bg: rowBg, align: 'center' }));
+    cell(sumWs, r, 3, counts.flagged,
+      s({ border: true, bg: counts.flagged > 0 ? C.highBg : rowBg,
+          fg: counts.flagged > 0 ? C.highFg : undefined,
+          bold: counts.flagged > 0, align: 'center' }));
+    cell(sumWs, r, 4, counts.contacted, s({ border: true, bg: rowBg, align: 'center' }));
+    cell(sumWs, r, 5, counts.awaiting_results, s({ border: true, bg: rowBg, align: 'center' }));
+    cell(sumWs, r, 6, counts.counselled + counts.closed, s({ border: true, bg: rowBg, align: 'center' }));
+    r++;
+    for (const k of STAGES) totals[k] = (totals[k] ?? 0) + counts[k];
+    totals.total += counts.total;
+  }
+
+  // Totals row
+  r++;
+  cell(sumWs, r, 0, 'TOTAL', s({ bold: true, border: true }));
+  cell(sumWs, r, 1, '',      s({ border: true }));
+  [totals.total, totals.flagged, totals.contacted, totals.awaiting_results, totals.counselled + totals.closed]
+    .forEach((v, i) => cell(sumWs, r, i + 2, v, s({ bold: true, border: true, align: 'center' })));
+
+  sumWs['!ref']    = XLSXStyle.utils.encode_range({ s: { r: 0, c: 0 }, e: { r, c: 6 } });
+  sumWs['!merges'] = sumMrg;
+  sumWs['!cols']   = [{ wch: 12 }, { wch: 42 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 18 }, { wch: 20 }];
+  XLSXStyle.utils.book_append_sheet(wb, sumWs, 'Summary');
+
+  // Per-study sheets
+  const SKIP = new Set([...EXPORT_SKIP, ...COMMON_KEYS]);
+  for (const study of Object.values(studies).sort((a, b) => a.id.localeCompare(b.id))) {
+    const pts = allPatients.filter(p => p.studyId === study.id);
+    if (pts.length === 0) continue;
+    const studyKeys = (study.headers ?? []).filter(k => !SKIP.has(k) && !k.startsWith('_'));
+    const sheetName = (study.shortName || study.id).replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 31) || study.id.slice(0, 31);
+    const ws = buildPatientSheet(pts, studyKeys, recontactCases, providerAssignments, false);
+    XLSXStyle.utils.book_append_sheet(wb, ws, sheetName);
+  }
+
+  const dateStr = new Date().toISOString().split('T')[0];
+  XLSXStyle.writeFile(wb, `MyAfroDNA_All_Studies_${dateStr}.xlsx`);
+}

@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import {
   LayoutDashboard, AlertTriangle, GitMerge, Menu, X, Dna,
-  ChevronDown, ChevronRight, Database, LogOut, BookOpen,
+  ChevronDown, ChevronRight, Database, LogOut, BookOpen, Trash2,
 } from 'lucide-react';
 import { getCategoryStyle } from '../data/studyCategories';
 import useAppStore from '../store/appStore';
-import { signOut } from '../services/dataService';
+import { signOut, resetAllData } from '../services/dataService';
+import ConfirmModal from './ConfirmModal';
 
 const BIOBANK_NAV = [
   { key: 'dashboard', label: 'Biobank Overview',      Icon: LayoutDashboard },
@@ -62,7 +63,7 @@ function StudiesSection({ studies, activeScreen, activeStudyId, patientCounts, o
   );
 }
 
-function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, studies, patientCounts, onClose }) {
+function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, studies, patientCounts, onClose, onResetData }) {
   return (
     <nav className="flex flex-col h-full">
       {/* Brand */}
@@ -125,6 +126,12 @@ function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, stu
           {Object.values(studies).length} stud{Object.values(studies).length !== 1 ? 'ies' : 'y'} loaded
         </p>
         <button
+          onClick={onResetData}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-red-400 hover:bg-red-900/30 hover:text-red-300 transition-colors">
+          <Trash2 size={14} />
+          Reset All Data
+        </button>
+        <button
           onClick={() => signOut()}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-teal-300 hover:bg-teal-800 hover:text-white transition-colors"
         >
@@ -137,9 +144,18 @@ function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, stu
 }
 
 export default function Layout({ activeScreen, onNavigate, flaggedCount, activeStudyId, children }) {
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [mobileOpen,    setMobileOpen]    = useState(false);
+  const [resetConfirm,  setResetConfirm]  = useState(false);
+  const [resetting,     setResetting]     = useState(false);
   const studies     = useAppStore(s => s.studies);
   const rawPatients = useAppStore(s => s.rawPatients);
+
+  const handleReset = async () => {
+    setResetting(true);
+    await resetAllData();
+    setResetting(false);
+    setResetConfirm(false);
+  };
   const patientCounts = Object.fromEntries(
     Object.keys(studies).map(id => [id, rawPatients.filter(p => p.studyId === id).length])
   );
@@ -159,6 +175,7 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
           flaggedCount={flaggedCount}
           studies={studies}
           patientCounts={patientCounts}
+          onResetData={() => setResetConfirm(true)}
         />
       </aside>
 
@@ -180,6 +197,7 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
               studies={studies}
               patientCounts={patientCounts}
               onClose={() => setMobileOpen(false)}
+              onResetData={() => setResetConfirm(true)}
             />
           </aside>
         </div>
@@ -206,6 +224,17 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
           {children}
         </main>
       </div>
+
+      {resetConfirm && (
+        <ConfirmModal
+          title="Reset All Data"
+          message="This will permanently delete all studies, patients, providers, rules, and recontact events from the database. This cannot be undone. Are you sure?"
+          confirmLabel={resetting ? 'Resetting…' : 'Delete Everything'}
+          danger
+          onConfirm={handleReset}
+          onCancel={() => setResetConfirm(false)}
+        />
+      )}
     </div>
   );
 }

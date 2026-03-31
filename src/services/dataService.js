@@ -971,3 +971,22 @@ export async function seedDefaultRules() {
   const { data } = await supabase.from('recontact_rules').select('*').order('study_id').order('created_at');
   setState({ rules: data ?? [] });
 }
+
+// ── Reset — wipe all data from Supabase and clear local cache ────────────────
+
+export async function resetAllData() {
+  // Delete children before parents (FK order)
+  await supabase.from('notes').delete().gte('created_at', '1970-01-01');
+  await supabase.from('recontact_events').delete().gte('created_at', '1970-01-01');
+  await supabase.from('patients').delete().gte('created_at', '1970-01-01');
+  await supabase.from('providers').delete().gte('created_at', '1970-01-01');
+  await supabase.from('recontact_rules').delete().gte('created_at', '1970-01-01');
+  await supabase.from('studies').delete().gte('created_at', '1970-01-01');
+
+  setState({
+    rawPatients: [], studies: {}, providers: [],
+    recontactCases: {}, providerAssignments: {},
+    emailedPatients: new Set(), patientNotes: {}, rules: [],
+    loading: false,
+  });
+}
