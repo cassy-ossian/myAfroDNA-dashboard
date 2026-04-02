@@ -237,31 +237,50 @@ export async function loadFromSupabase() {
     supabase.from('profiles').select('*').order('created_at'),
   ]);
 
-  profilesData = _profilesData;
+  profilesData = _profilesData ?? [];
 
   for (const err of [e1, e2, e3, e4, e5, e6, e7]) {
     if (err) console.error('[dataService] load error:', err.message);
   }
 
-  // Determine current user's role from profiles
+  // Determine current user's role from profiles.
+  // Try three approaches because RLS may block the bulk query:
   const currentUserId = getState().user?.id;
-  let myProfile = (profilesData ?? []).find(p => p.id === currentUserId);
+  let myProfile = profilesData.find(p => p.id === currentUserId);
 
-  // Fallback: if the bulk profiles query didn't return our row (RLS), fetch directly
   if (!myProfile && currentUserId) {
-    const { data: selfRow } = await supabase
+    // Attempt 1: direct eq query (works with "self manage" SELECT policy)
+    const { data: selfRow, error: selfErr } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', currentUserId)
       .maybeSingle();
+    if (selfErr) console.error('[dataService] profile self-fetch error:', selfErr.message);
     if (selfRow) {
       myProfile = selfRow;
-      // Merge into profilesData so the store has it
-      if (!profilesData) profilesData = [];
       profilesData.push(selfRow);
     }
   }
+
+  if (!myProfile && currentUserId) {
+    // Attempt 2: no profile row exists at all — create one with admin role.
+    // This covers the case where the user signed in but never ran loadDemoData
+    // and never had a profile row inserted via SQL.
+    const userEmail = getState().user?.email;
+    const { data: created, error: createErr } = await supabase
+      .from('profiles')
+      .upsert({ id: currentUserId, email: userEmail, role: 'admin' }, { onConflict: 'id' })
+      .select()
+      .maybeSingle();
+    if (createErr) console.error('[dataService] profile auto-create error:', createErr.message);
+    if (created) {
+      myProfile = created;
+      profilesData.push(created);
+    }
+  }
+
   const userRole = myProfile?.role ?? null;
+  console.log('[dataService] userRole resolved:', userRole, 'profilesCount:', profilesData.length);
 
   // Studies
   const studies = Object.fromEntries(
