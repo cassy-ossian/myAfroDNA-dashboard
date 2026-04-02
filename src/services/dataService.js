@@ -218,6 +218,7 @@ export async function refreshRecontactEvents() {
 export async function loadFromSupabase() {
   setState({ loading: true });
 
+  let profilesData;
   const [
     { data: studiesData,   error: e1 },
     { data: patientsData,  error: e2 },
@@ -225,7 +226,7 @@ export async function loadFromSupabase() {
     { data: eventsData,    error: e4 },
     { data: notesData,     error: e5 },
     { data: rulesData,     error: e6 },
-    { data: profilesData,  error: e7 },
+    { data: _profilesData, error: e7 },
   ] = await Promise.all([
     supabase.from('studies').select('*').order('id'),
     supabase.from('patients').select('*').order('myafrodna_id'),
@@ -236,13 +237,30 @@ export async function loadFromSupabase() {
     supabase.from('profiles').select('*').order('created_at'),
   ]);
 
+  profilesData = _profilesData;
+
   for (const err of [e1, e2, e3, e4, e5, e6, e7]) {
     if (err) console.error('[dataService] load error:', err.message);
   }
 
   // Determine current user's role from profiles
   const currentUserId = getState().user?.id;
-  const myProfile = (profilesData ?? []).find(p => p.id === currentUserId);
+  let myProfile = (profilesData ?? []).find(p => p.id === currentUserId);
+
+  // Fallback: if the bulk profiles query didn't return our row (RLS), fetch directly
+  if (!myProfile && currentUserId) {
+    const { data: selfRow } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', currentUserId)
+      .maybeSingle();
+    if (selfRow) {
+      myProfile = selfRow;
+      // Merge into profilesData so the store has it
+      if (!profilesData) profilesData = [];
+      profilesData.push(selfRow);
+    }
+  }
   const userRole = myProfile?.role ?? null;
 
   // Studies
