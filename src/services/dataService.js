@@ -188,6 +188,7 @@ export function initAuth() {
 }
 
 export async function signOut() {
+  try { localStorage.removeItem('myafrodna_userRole'); } catch {}
   await supabase.auth.signOut();
 }
 
@@ -244,43 +245,25 @@ export async function loadFromSupabase() {
   }
 
   // Determine current user's role from profiles.
-  // Try three approaches because RLS may block the bulk query:
   const currentUserId = getState().user?.id;
   let myProfile = profilesData.find(p => p.id === currentUserId);
 
   if (!myProfile && currentUserId) {
-    // Attempt 1: direct eq query (works with "self manage" SELECT policy)
-    const { data: selfRow, error: selfErr } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', currentUserId)
-      .maybeSingle();
-    if (selfErr) console.error('[dataService] profile self-fetch error:', selfErr.message);
+    const { data: selfRow } = await supabase
+      .from('profiles').select('*').eq('id', currentUserId).maybeSingle();
     if (selfRow) {
       myProfile = selfRow;
       profilesData.push(selfRow);
     }
   }
 
-  if (!myProfile && currentUserId) {
-    // Attempt 2: no profile row exists at all — create one with admin role.
-    // This covers the case where the user signed in but never ran loadDemoData
-    // and never had a profile row inserted via SQL.
-    const userEmail = getState().user?.email;
-    const { data: created, error: createErr } = await supabase
-      .from('profiles')
-      .upsert({ id: currentUserId, email: userEmail, role: 'admin' }, { onConflict: 'id' })
-      .select()
-      .maybeSingle();
-    if (createErr) console.error('[dataService] profile auto-create error:', createErr.message);
-    if (created) {
-      myProfile = created;
-      profilesData.push(created);
-    }
+  // If RLS blocks all reads, fall back to localStorage cache
+  let userRole = myProfile?.role ?? null;
+  if (userRole) {
+    try { localStorage.setItem('myafrodna_userRole', userRole); } catch {}
+  } else {
+    try { userRole = localStorage.getItem('myafrodna_userRole'); } catch {}
   }
-
-  const userRole = myProfile?.role ?? null;
-  console.log('[dataService] userRole resolved:', userRole, 'profilesCount:', profilesData.length);
 
   // Studies
   const studies = Object.fromEntries(
@@ -903,7 +886,11 @@ export async function loadDemoData() {
   // 7. Reload everything from DB
   await loadFromSupabase();
 
-  // 8. Run rules to auto-flag matching patients
+  // 8. Ensure admin role is set — loadFromSupabase may fail to read it due to RLS
+  setState({ userRole: 'admin' });
+  try { localStorage.setItem('myafrodna_userRole', 'admin'); } catch {}
+
+  // 9. Run rules to auto-flag matching patients
   await runAllRules();
 }
 
