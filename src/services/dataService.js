@@ -996,26 +996,28 @@ export async function updateUserRole(userId, role) {
   const { data, error } = await supabase.from('profiles')
     .update({ role })
     .eq('id', userId)
-    .select()
-    .single();
+    .select();
   if (error) throw error;
+  const updated = data?.[0];
+  if (!updated) throw new Error('Update returned no rows — check RLS policies on profiles table.');
   setState(s => ({
-    profiles: s.profiles.map(p => p.id === userId ? data : p),
+    profiles: s.profiles.map(p => p.id === userId ? updated : p),
   }));
-  return data;
+  return updated;
 }
 
 export async function updateUserStudies(userId, assignedStudies) {
   const { data, error } = await supabase.from('profiles')
     .update({ assigned_studies: assignedStudies })
     .eq('id', userId)
-    .select()
-    .single();
+    .select();
   if (error) throw error;
+  const updated = data?.[0];
+  if (!updated) throw new Error('Update returned no rows — check RLS policies on profiles table.');
   setState(s => ({
-    profiles: s.profiles.map(p => p.id === userId ? data : p),
+    profiles: s.profiles.map(p => p.id === userId ? updated : p),
   }));
-  return data;
+  return updated;
 }
 
 export async function inviteUser(email, name) {
