@@ -1,6 +1,7 @@
 // Printable/exportable provider report for flagged patients.
 // Designed to be handed to a cardiologist — clean, no jargon where avoidable.
 import { X, Printer } from 'lucide-react';
+import logoImg from '../assets/myafrodna-logo.png';
 
 const TODAY = new Date().toLocaleDateString('en-GB', {
   day: '2-digit', month: 'long', year: 'numeric'
@@ -38,8 +39,8 @@ export default function ProviderReport({ flaggedPatients, onClose }) {
           <div className="border-b-2 border-teal-700 pb-6">
             <div className="flex items-start justify-between">
               <div>
-                <h1 className="text-2xl font-bold text-teal-800">MyAfroDNA</h1>
-                <p className="text-sm text-gray-500 mt-0.5">Pharmacogenomics Research Programme</p>
+                <img src={logoImg} alt="MyAfroDNA" className="h-12 mb-1" />
+                <p className="text-sm text-gray-500 mt-0.5">Genomic Medicine Research Programme</p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Report Generated</p>
@@ -48,7 +49,7 @@ export default function ProviderReport({ flaggedPatients, onClose }) {
             </div>
             <div className="mt-4">
               <h2 className="text-lg font-bold text-gray-900">
-                CYP2C19 Pharmacogenomics — Patient Recontact Summary
+                CYP2C19 Genomic Medicine — Patient Recontact Summary
               </h2>
               <p className="text-sm text-gray-600 mt-1">
                 Study: Clopidogrel Metabolism &amp; Cardiovascular Outcomes

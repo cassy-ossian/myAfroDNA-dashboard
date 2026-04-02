@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Check, Dna, Loader2 } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
+import logoImg from './assets/myafrodna-logo.png';
 import Layout from './components/Layout';
 import LoginPage from './components/LoginPage';
 import BiobankDashboard from './components/BiobankDashboard';
@@ -11,6 +12,7 @@ import RulesPage from './components/RulesPage';
 import PatientModal from './components/PatientModal';
 import StudyView from './components/StudyView';
 import WorkbookImport from './components/WorkbookImport';
+import UserManagement from './components/UserManagement';
 import { classifyPatient } from './data/flaggingRules';
 import useAppStore from './store/appStore';
 import {
@@ -37,9 +39,7 @@ import './index.css';
 function AppLoader() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">
-      <div className="w-14 h-14 rounded-2xl bg-teal-700 flex items-center justify-center">
-        <Dna size={28} className="text-white" />
-      </div>
+      <img src={logoImg} alt="MyAfroDNA" className="h-16" />
       <div className="flex items-center gap-2 text-gray-500 text-sm">
         <Loader2 size={16} className="animate-spin" />
         Loading biobank data…
@@ -239,6 +239,10 @@ function AuthenticatedApp() {
 
         {activeScreen === 'rules' && (
           <RulesPage onNavigate={handleNavigate} />
+        )}
+
+        {activeScreen === 'users' && (
+          <UserManagement />
         )}
 
         {activeScreen === 'recontact' && (

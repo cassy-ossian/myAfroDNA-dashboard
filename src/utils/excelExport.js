@@ -4,7 +4,7 @@ import { getInterpretation } from '../data/clinicalInterpretations';
 // ── Palette ───────────────────────────────────────────────────────────────────
 
 const C = {
-  titleBg:    '0F766E', titleFg:    'FFFFFF',  // teal-700
+  titleBg:    '248A2E', titleFg:    'FFFFFF',  // brand green-700
   thBg:       'DBEAFE', thFg:       '1E3A8A',  // blue-100/900
   highBg:     'FEE2E2', highFg:     '991B1B',  // red-100/800
   medBg:      'FEF3C7', medFg:      '92400E',  // amber-100/800

@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Dna, Mail, Lock, AlertCircle, Loader2 } from 'lucide-react';
+import { Mail, Lock, AlertCircle, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import logoImg from '../assets/myafrodna-logo.png';
 
 export default function LoginPage() {
   const [email,    setEmail]    = useState('');
@@ -25,11 +26,8 @@ export default function LoginPage() {
       <div className="w-full max-w-sm space-y-6">
         {/* Brand */}
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-teal-700 mb-4">
-            <Dna size={28} className="text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900">MyAfroDNA</h1>
-          <p className="text-gray-500 text-sm mt-1">Pharmacogenomics Dashboard</p>
+          <img src={logoImg} alt="MyAfroDNA" className="h-20 mx-auto mb-4" />
+          <p className="text-gray-500 text-sm mt-1">Genomic Medicine Platform</p>
         </div>
 
         {/* Card */}

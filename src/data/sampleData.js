@@ -28,7 +28,7 @@ export const DEMO_STUDIES = {
     name: 'Clopidogrel Metabolism Study (Phase 1)',
     shortName: 'CLOP1',
     category: 'Cardiovascular',
-    description: 'CYP2C19 pharmacogenomics in patients on clopidogrel therapy at RSUTH cardiac units.',
+    description: 'CYP2C19 genomic medicine in patients on clopidogrel therapy at RSUTH cardiac units.',
     hasCYP2C19: true,
     hasContactInfo: false,
     headers: ['providerCode','id','sampleType','age','sex','lga','tribe','clinicalConditions','cardioDisease','clopidogrelUsage','otherDrugs','clopidogrelComplications','recurrentASCVD','genotype','enrollmentDate','site','sampleCollected','sampleDate','genotypingComplete','genotypingDate'],

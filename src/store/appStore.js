@@ -2,10 +2,12 @@ import { create } from 'zustand';
 
 const useAppStore = create((set, get) => ({
   // ── Auth ──────────────────────────────────────────────────
-  user:    null,
-  loading: true,
+  user:     null,
+  userRole: null,
+  loading:  true,
 
   // ── Data ──────────────────────────────────────────────────
+  profiles:            [],
   rawPatients:         [],
   studies:             {},
   activeStudyId:       null,

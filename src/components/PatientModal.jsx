@@ -117,7 +117,7 @@ export default function PatientModal({ patient, onClose, onUpdateContactPathway,
           {/* Phenotype */}
           {patient.phenotype && (
             <div>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Pharmacogenomics Result</h3>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Genomic Medicine Result</h3>
               <div className="bg-gray-50 rounded-lg p-4 space-y-3">
                 <Field label="CYP2C19 Phenotype" value={patient.phenotype} />
                 {patient.implication && (

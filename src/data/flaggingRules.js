@@ -1,4 +1,4 @@
-// CYP2C19 pharmacogenomics flagging rules for clopidogrel metabolism study.
+// CYP2C19 genomic medicine flagging rules for clopidogrel metabolism study.
 // Each rule maps a genotype to its phenotype classification, clinical implication,
 // suggested action, and priority level. Priority null = no action needed.
 // Add new rules here to extend for new variants or studies — do not hardcode in UI.
@@ -132,7 +132,7 @@ export function classifyPatient(patient) {
     implication:     display?.implication    ?? (patient.genotype ? 'Not in current rules set. Manual review required.' : null),
     flagged:         false,
     priority:        null,
-    suggestedAction: display?.suggestedAction ?? (patient.genotype ? 'Contact study pharmacogenomics team for classification.' : null),
+    suggestedAction: display?.suggestedAction ?? (patient.genotype ? 'Contact study genomic medicine team for classification.' : null),
     flaggedBy:       null,
   };
 }

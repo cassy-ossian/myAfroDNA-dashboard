@@ -178,8 +178,8 @@ export function initAuth() {
       loadFromSupabase();
     } else if (event === 'SIGNED_OUT') {
       setState({
-        user: null, loading: false,
-        rawPatients: [], studies: {}, providers: [],
+        user: null, userRole: null, loading: false,
+        rawPatients: [], studies: {}, providers: [], profiles: [],
         recontactCases: {}, providerAssignments: {},
         emailedPatients: new Set(), patientNotes: {},
       });
@@ -225,6 +225,7 @@ export async function loadFromSupabase() {
     { data: eventsData,    error: e4 },
     { data: notesData,     error: e5 },
     { data: rulesData,     error: e6 },
+    { data: profilesData,  error: e7 },
   ] = await Promise.all([
     supabase.from('studies').select('*').order('id'),
     supabase.from('patients').select('*').order('myafrodna_id'),
@@ -232,11 +233,17 @@ export async function loadFromSupabase() {
     supabase.from('recontact_events').select('*'),
     supabase.from('notes').select('*').order('created_at', { ascending: false }),
     supabase.from('recontact_rules').select('*').order('study_id').order('created_at'),
+    supabase.from('profiles').select('*').order('created_at'),
   ]);
 
-  for (const err of [e1, e2, e3, e4, e5, e6]) {
+  for (const err of [e1, e2, e3, e4, e5, e6, e7]) {
     if (err) console.error('[dataService] load error:', err.message);
   }
+
+  // Determine current user's role from profiles
+  const currentUserId = getState().user?.id;
+  const myProfile = (profilesData ?? []).find(p => p.id === currentUserId);
+  const userRole = myProfile?.role ?? null;
 
   // Studies
   const studies = Object.fromEntries(
@@ -295,6 +302,8 @@ export async function loadFromSupabase() {
     studies, providers, providerAssignments, recontactCases, patientNotes,
     rawPatients: annotatedPatients,
     rules: rulesData ?? [],
+    profiles: profilesData ?? [],
+    userRole,
     loading: false,
   });
 }
@@ -970,6 +979,65 @@ export async function seedDefaultRules() {
   }
   const { data } = await supabase.from('recontact_rules').select('*').order('study_id').order('created_at');
   setState({ rules: data ?? [] });
+}
+
+// ── Reset — wipe all data from Supabase and clear local cache ────────────────
+
+// ── User management ──────────────────────────────────────────────────────────
+
+export async function loadProfiles() {
+  const { data, error } = await supabase.from('profiles').select('*').order('created_at');
+  if (error) { console.error('[loadProfiles]', error.message); return []; }
+  setState({ profiles: data ?? [] });
+  return data ?? [];
+}
+
+export async function updateUserRole(userId, role) {
+  const { data, error } = await supabase.from('profiles')
+    .update({ role })
+    .eq('id', userId)
+    .select()
+    .single();
+  if (error) throw error;
+  setState(s => ({
+    profiles: s.profiles.map(p => p.id === userId ? data : p),
+  }));
+  return data;
+}
+
+export async function updateUserStudies(userId, assignedStudies) {
+  const { data, error } = await supabase.from('profiles')
+    .update({ assigned_studies: assignedStudies })
+    .eq('id', userId)
+    .select()
+    .single();
+  if (error) throw error;
+  setState(s => ({
+    profiles: s.profiles.map(p => p.id === userId ? data : p),
+  }));
+  return data;
+}
+
+export async function inviteUser(email, name) {
+  const tempPassword = crypto.randomUUID().slice(0, 12);
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password: tempPassword,
+  });
+  if (error) throw error;
+
+  // Create profile row for the new user
+  if (data?.user?.id) {
+    await supabase.from('profiles').upsert({
+      id: data.user.id,
+      email,
+      name: name || null,
+      role: 'provider',
+    }, { onConflict: 'id' });
+    await loadProfiles();
+  }
+
+  return { user: data.user, tempPassword };
 }
 
 // ── Reset — wipe all data from Supabase and clear local cache ────────────────

@@ -34,9 +34,9 @@ export const CLINICAL_INTERPRETATIONS = {
     recommendedAction: 'Platelet function testing recommended; individual clinical review with pharmacologist',
   },
   '*1/*1': {
-    reportSummary: 'This patient has a normal CYP2C19 genotype and is expected to metabolize clopidogrel at the standard rate. No dose adjustment is required based on pharmacogenomic findings.',
+    reportSummary: 'This patient has a normal CYP2C19 genotype and is expected to metabolize clopidogrel at the standard rate. No dose adjustment is required based on genomic medicine findings.',
     clinicalSignificance: 'Normal clopidogrel metabolism expected',
-    recommendedAction: 'Standard dosing — no pharmacogenomic-based changes required',
+    recommendedAction: 'Standard dosing — no genomic medicine-based changes required',
   },
 };
 

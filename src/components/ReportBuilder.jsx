@@ -74,7 +74,7 @@ function buildPrintHTML({ groups, grouping, customNote, reportDate, totalCount }
 </head>
 <body>
 <h1>MyAfroDNA Recontact Report</h1>
-<p class="subtitle">CYP2C19 Pharmacogenomics Study — Confidential Clinical Communication</p>
+<p class="subtitle">CYP2C19 Genomic Medicine Study — Confidential Clinical Communication</p>
 <div class="meta">
   <span><strong>Report date:</strong> ${formatDate(reportDate)}</span>
   <span><strong>Patients included:</strong> ${totalCount}</span>

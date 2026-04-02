@@ -32,7 +32,7 @@ function buildBulkBody(providerName, patients) {
 
   return `${formatGreeting(providerName)}
 
-We are writing to inform you of pharmacogenomic findings from the CYP2C19 Clopidogrel Metabolism Study that require your attention for the following patient${patients.length !== 1 ? 's' : ''}:
+We are writing to inform you of genomic medicine findings from the CYP2C19 Clopidogrel Metabolism Study that require your attention for the following patient${patients.length !== 1 ? 's' : ''}:
 
 ${sections.join('\n\n')}
 

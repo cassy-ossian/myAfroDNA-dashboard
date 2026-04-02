@@ -17,7 +17,7 @@ function buildBody(patient, providerName) {
   const interp = getInterpretation(patient.genotype);
   return `${formatProviderGreeting(providerName)}
 
-We are writing to inform you of a pharmacogenomic finding from the CYP2C19 Clopidogrel Metabolism Study that requires your attention.
+We are writing to inform you of a genomic medicine finding from the CYP2C19 Clopidogrel Metabolism Study that requires your attention.
 
 Patient: ${patient.id}
 Finding: ${patient.genotype || '—'} — ${patient.phenotype || '—'}
@@ -36,7 +36,7 @@ ${STUDY_EMAIL}`;
 
 function buildWhatsApp(patient) {
   const interp = getInterpretation(patient.genotype);
-  return `*MyAfroDNA Recontact — ${patient.id}*\nGenotype: ${patient.genotype} (${patient.phenotype})\nAction required: ${interp?.recommendedAction || patient.suggestedAction || '—'}\n\nThis is a priority recontact request from the MyAfroDNA CYP2C19 study. Please contact this patient regarding their pharmacogenomic findings.\n\n— MyAfroDNA Study Team`;
+  return `*MyAfroDNA Recontact — ${patient.id}*\nGenotype: ${patient.genotype} (${patient.phenotype})\nAction required: ${interp?.recommendedAction || patient.suggestedAction || '—'}\n\nThis is a priority recontact request from the MyAfroDNA CYP2C19 study. Please contact this patient regarding their genomic medicine findings.\n\n— MyAfroDNA Study Team`;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────

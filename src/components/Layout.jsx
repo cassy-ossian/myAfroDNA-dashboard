@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import {
-  LayoutDashboard, AlertTriangle, GitMerge, Menu, X, Dna,
-  ChevronDown, ChevronRight, Database, LogOut, BookOpen, Trash2,
+  LayoutDashboard, AlertTriangle, GitMerge, Menu, X,
+  ChevronDown, ChevronRight, Database, LogOut, BookOpen, Trash2, Users,
 } from 'lucide-react';
 import { getCategoryStyle } from '../data/studyCategories';
 import useAppStore from '../store/appStore';
 import { signOut, resetAllData } from '../services/dataService';
 import ConfirmModal from './ConfirmModal';
+import logoImg from '../assets/myafrodna-logo.png';
 
 const BIOBANK_NAV = [
   { key: 'dashboard', label: 'Biobank Overview',      Icon: LayoutDashboard },
@@ -63,20 +64,18 @@ function StudiesSection({ studies, activeScreen, activeStudyId, patientCounts, o
   );
 }
 
-function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, studies, patientCounts, onClose, onResetData }) {
+function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, studies, patientCounts, onClose, onResetData, userRole }) {
   return (
     <nav className="flex flex-col h-full">
-      {/* Brand */}
-      <div className="px-5 py-6 border-b border-teal-800">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-teal-400/20 flex items-center justify-center">
-            <Dna size={18} className="text-teal-200" />
-          </div>
-          <div>
-            <p className="font-bold text-white text-sm leading-tight">MyAfroDNA</p>
-            <p className="text-teal-400 text-xs">Pharmacogenomics</p>
-          </div>
-        </div>
+      {/* Brand — clickable, navigates to Dashboard */}
+      <div className="px-4 py-5 border-b border-teal-800">
+        <button
+          onClick={() => { onNavigate('dashboard'); onClose?.(); }}
+          className="block w-full cursor-pointer"
+        >
+          <img src={logoImg} alt="MyAfroDNA" className="h-10 w-auto" />
+          <p className="text-teal-400 text-[10px] mt-1">Genomic Medicine Platform</p>
+        </button>
       </div>
 
       {/* Scrollable nav area */}
@@ -106,6 +105,21 @@ function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, stu
             </button>
           );
         })}
+
+        {/* Admin-only: User Management */}
+        {userRole === 'admin' && (
+          <button
+            onClick={() => { onNavigate('users'); onClose?.(); }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              activeScreen === 'users'
+                ? 'bg-teal-600 text-white'
+                : 'text-teal-100 hover:bg-teal-800 hover:text-white'
+            }`}
+          >
+            <Users size={17} className="shrink-0" />
+            <span className="flex-1 text-left">User Management</span>
+          </button>
+        )}
 
         {/* Per-study section */}
         <div className="border-t border-teal-800 mt-2 pt-2">
@@ -149,6 +163,7 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
   const [resetting,     setResetting]     = useState(false);
   const studies     = useAppStore(s => s.studies);
   const rawPatients = useAppStore(s => s.rawPatients);
+  const userRole    = useAppStore(s => s.userRole);
 
   const handleReset = async () => {
     setResetting(true);
@@ -176,6 +191,7 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
           studies={studies}
           patientCounts={patientCounts}
           onResetData={() => setResetConfirm(true)}
+          userRole={userRole}
         />
       </aside>
 
@@ -198,6 +214,7 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
               patientCounts={patientCounts}
               onClose={() => setMobileOpen(false)}
               onResetData={() => setResetConfirm(true)}
+              userRole={userRole}
             />
           </aside>
         </div>
@@ -211,8 +228,7 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
             <Menu size={22} />
           </button>
           <div className="flex items-center gap-2">
-            <Dna size={16} className="text-teal-300" />
-            <span className="font-bold text-white text-sm">MyAfroDNA</span>
+            <img src={logoImg} alt="MyAfroDNA" className="h-6 w-auto" />
           </div>
           {activeName && (
             <span className="text-teal-300 text-sm ml-auto truncate max-w-32">{activeName}</span>
