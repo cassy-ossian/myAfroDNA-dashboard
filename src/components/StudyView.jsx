@@ -1,11 +1,11 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Search, ChevronUp, ChevronDown, AlertTriangle, Dna, Phone, BookOpen, Play, Settings, Loader2, Download } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, AlertTriangle, Dna, Phone, BookOpen, Play, Settings, Loader2, Download, Trash2, Check, X, Lock } from 'lucide-react';
 import { getRulesForStudy, runRulesForStudy } from '../services/rulesEngine';
 import StudyBadge from './StudyBadge';
 import PathwayBadge from './PathwayBadge';
 import BatchActionBar from './BatchActionBar';
 import FlagForRecontactModal from './FlagForRecontactModal';
-import { manuallyFlagPatients, bulkAssignProvider } from '../services/dataService';
+import { manuallyFlagPatients, bulkAssignProvider, deleteStudy, updatePatient } from '../services/dataService';
 import { exportPatientList } from '../utils/excelExport';
 import useAppStore from '../store/appStore';
 
@@ -61,6 +61,82 @@ function CellValue({ field, value, patient }) {
   }
   if (value === null || value === undefined || value === '') return <span className="text-gray-300">—</span>;
   return <span className="text-gray-700">{String(value)}</span>;
+}
+
+// Inline editable table cell. Shows CellValue in read mode; on click turns into
+// an input. Saves on Enter or blur; Esc cancels. Shows a brief check/× after save.
+const NON_EDITABLE_FIELDS = new Set(['id', 'flagged', 'priority', 'phenotype', 'implication', 'suggestedAction']);
+
+function EditableCell({ field, value, patient, readOnly, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft,   setDraft]   = useState('');
+  const [status,  setStatus]  = useState(null); // 'saving' | 'ok' | 'err' | null
+
+  const canEdit = !readOnly && !NON_EDITABLE_FIELDS.has(field);
+
+  const beginEdit = (e) => {
+    if (!canEdit) return;
+    e.stopPropagation();
+    setDraft(value == null ? '' : String(value));
+    setEditing(true);
+  };
+
+  const commit = async () => {
+    setEditing(false);
+    if (String(value ?? '') === draft) return;
+    setStatus('saving');
+    try {
+      // Parse booleans for yes/no fields
+      let parsed = draft.trim();
+      if (parsed === '') parsed = null;
+      else if (field === 'sampleCollected' || field === 'genotypingComplete') {
+        parsed = /^(yes|y|true|1)$/i.test(parsed);
+      } else if (field === 'age') {
+        const n = Number(parsed);
+        if (!Number.isNaN(n)) parsed = n;
+      }
+      await onSave(patient.id, field, parsed);
+      setStatus('ok');
+      setTimeout(() => setStatus(null), 1500);
+    } catch (err) {
+      console.error('[EditableCell] save failed:', err);
+      setStatus('err');
+      setTimeout(() => setStatus(null), 2500);
+    }
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="text"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); commit(); }
+          if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
+        }}
+        onClick={e => e.stopPropagation()}
+        className="w-full border border-teal-500 rounded px-1.5 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
+      />
+    );
+  }
+
+  return (
+    <div
+      onClick={beginEdit}
+      className={`flex items-center gap-1 ${canEdit ? 'hover:bg-teal-50 rounded px-1 -mx-1' : ''}`}
+      title={canEdit ? 'Click to edit' : undefined}
+    >
+      <div className="flex-1 min-w-0 truncate">
+        <CellValue field={field} value={value} patient={patient} />
+      </div>
+      {status === 'saving' && <Loader2 size={11} className="animate-spin text-gray-400 shrink-0" />}
+      {status === 'ok'     && <Check    size={11} className="text-teal-600 shrink-0" />}
+      {status === 'err'    && <X        size={11} className="text-red-600 shrink-0" />}
+    </div>
+  );
 }
 
 function RulesSummary({ studyId, onManageRules }) {
@@ -159,8 +235,50 @@ export default function StudyView({ study, patients, studies, providers, onSelec
   const [selected,  setSelected]  = useState(new Set());
   const [flagModal, setFlagModal] = useState(false);
 
+  // Delete study modal
+  const [deleteStep,   setDeleteStep]   = useState(0); // 0=closed, 1=typing
+  const [deleteInput,  setDeleteInput]  = useState('');
+  const [deleting,     setDeleting]     = useState(false);
+  const [deleteError,  setDeleteError]  = useState(null);
+
   const recontactCases      = useAppStore(s => s.recontactCases);
   const providerAssignments = useAppStore(s => s.providerAssignments);
+  const userRole            = useAppStore(s => s.userRole);
+  const profiles            = useAppStore(s => s.profiles);
+  const user                = useAppStore(s => s.user);
+
+  // Determine if the current user can edit patients in this study.
+  // Admin: always. Coordinator: only if study is in their assigned_studies. Provider: never.
+  const canEdit = useMemo(() => {
+    if (userRole === 'admin') return true;
+    if (userRole === 'coordinator') {
+      const me = profiles.find(p => p.id === user?.id);
+      return (me?.assigned_studies ?? []).includes(study?.id);
+    }
+    return false;
+  }, [userRole, profiles, user, study]);
+
+  const readOnly = !canEdit;
+
+  const handleCellSave = useCallback(async (patientId, field, value) => {
+    await updatePatient(patientId, { [field]: value });
+  }, []);
+
+  const handleDeleteStudy = useCallback(async () => {
+    if (!study) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteStudy(study.id);
+      setDeleting(false);
+      setDeleteStep(0);
+      setDeleteInput('');
+      onNavigate?.('dashboard');
+    } catch (err) {
+      setDeleting(false);
+      setDeleteError(err.message ?? 'Delete failed');
+    }
+  }, [study, onNavigate]);
 
   const columns = useMemo(() => {
     if (study?.headers?.length) return study.headers.filter(h => !HIDDEN_COLS.has(h));
@@ -256,8 +374,23 @@ export default function StudyView({ study, patients, studies, providers, onSelec
               <Download size={14} /> Export to Excel
             </button>
           )}
+          {userRole === 'admin' && (
+            <button
+              onClick={() => { setDeleteStep(1); setDeleteInput(''); setDeleteError(null); }}
+              className="flex items-center gap-2 px-3 py-2 border border-red-200 text-red-700 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors">
+              <Trash2 size={14} /> Delete Study
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Read-only banner for non-admin coordinators without study access */}
+      {readOnly && userRole !== 'provider' && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 text-sm">
+          <Lock size={14} className="shrink-0" />
+          You have read-only access to this study.
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -325,12 +458,29 @@ export default function StudyView({ study, patients, studies, providers, onSelec
                         <input type="checkbox" checked={isSel} onChange={() => toggleSelect(p.id)}
                           className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 cursor-pointer" />
                       </td>
-                      {columns.map(col => (
-                        <td key={col} onClick={() => onSelectPatient(p)}
-                          className="px-3 py-2.5 max-w-48 truncate cursor-pointer">
-                          <CellValue field={col} value={p[col]} patient={p} />
-                        </td>
-                      ))}
+                      {columns.map(col => {
+                        // Clicking the ID column opens the patient detail modal;
+                        // other columns become editable in place.
+                        if (col === 'id') {
+                          return (
+                            <td key={col} onClick={() => onSelectPatient(p)}
+                              className="px-3 py-2.5 max-w-48 truncate cursor-pointer">
+                              <CellValue field={col} value={p[col]} patient={p} />
+                            </td>
+                          );
+                        }
+                        return (
+                          <td key={col} className="px-3 py-2.5 max-w-48">
+                            <EditableCell
+                              field={col}
+                              value={p[col]}
+                              patient={p}
+                              readOnly={readOnly}
+                              onSave={handleCellSave}
+                            />
+                          </td>
+                        );
+                      })}
                       {study.hasContactInfo && (
                         <td className="px-3 py-2.5 cursor-pointer" onClick={() => onSelectPatient(p)}>
                           {p.contactPathway && p.contactPathway !== 'none'
@@ -375,6 +525,61 @@ export default function StudyView({ study, patients, studies, providers, onSelec
       {/* Flag modal */}
       {flagModal && (
         <FlagForRecontactModal patients={flagModal.patients} onConfirm={handleFlagConfirm} onCancel={() => setFlagModal(false)} />
+      )}
+
+      {/* Delete study confirmation */}
+      {deleteStep === 1 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <AlertTriangle size={20} className="text-red-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Delete Study</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  You are about to permanently delete <strong>{study.name}</strong> and all{' '}
+                  <strong>{patients.length}</strong> patient{patients.length !== 1 ? 's' : ''} in this study.
+                  This cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">
+                Type <strong className="font-mono text-red-700">{study.name}</strong> to confirm:
+              </label>
+              <input
+                type="text"
+                value={deleteInput}
+                onChange={e => setDeleteInput(e.target.value)}
+                autoFocus
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+            {deleteError && (
+              <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+                {deleteError}
+              </div>
+            )}
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => { setDeleteStep(0); setDeleteInput(''); setDeleteError(null); }}
+                disabled={deleting}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteStudy}
+                disabled={deleteInput !== study.name || deleting}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {deleting ? 'Deleting…' : 'Delete Study'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

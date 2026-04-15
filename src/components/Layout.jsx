@@ -141,12 +141,14 @@ function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, stu
         <p className="text-xs text-teal-400 font-medium px-1">
           {Object.values(studies).length} stud{Object.values(studies).length !== 1 ? 'ies' : 'y'} loaded
         </p>
-        <button
-          onClick={onResetData}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-red-400 hover:bg-red-900/30 hover:text-red-300 transition-colors">
-          <Trash2 size={14} />
-          Reset All Data
-        </button>
+        {userRole === 'admin' && (
+          <button
+            onClick={onResetData}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-red-400 hover:bg-red-900/30 hover:text-red-300 transition-colors">
+            <Trash2 size={14} />
+            Reset All Data
+          </button>
+        )}
         <button
           onClick={() => signOut()}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-teal-300 hover:bg-teal-800 hover:text-white transition-colors"
@@ -161,7 +163,8 @@ function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, stu
 
 export default function Layout({ activeScreen, onNavigate, flaggedCount, activeStudyId, children }) {
   const [mobileOpen,    setMobileOpen]    = useState(false);
-  const [resetConfirm,  setResetConfirm]  = useState(false);
+  const [resetStep,     setResetStep]     = useState(0); // 0=closed, 1=warn, 2=type RESET
+  const [resetInput,    setResetInput]    = useState('');
   const [resetting,     setResetting]     = useState(false);
   const studies     = useAppStore(s => s.studies);
   const rawPatients = useAppStore(s => s.rawPatients);
@@ -171,7 +174,8 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
     setResetting(true);
     await resetAllData();
     setResetting(false);
-    setResetConfirm(false);
+    setResetStep(0);
+    setResetInput('');
   };
   const patientCounts = Object.fromEntries(
     Object.keys(studies).map(id => [id, rawPatients.filter(p => p.studyId === id).length])
@@ -192,7 +196,7 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
           flaggedCount={flaggedCount}
           studies={studies}
           patientCounts={patientCounts}
-          onResetData={() => setResetConfirm(true)}
+          onResetData={() => setResetStep(1)}
           userRole={userRole}
         />
       </aside>
@@ -215,7 +219,7 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
               studies={studies}
               patientCounts={patientCounts}
               onClose={() => setMobileOpen(false)}
-              onResetData={() => setResetConfirm(true)}
+              onResetData={() => setResetStep(1)}
               userRole={userRole}
             />
           </aside>
@@ -243,15 +247,48 @@ export default function Layout({ activeScreen, onNavigate, flaggedCount, activeS
         </main>
       </div>
 
-      {resetConfirm && (
+      {resetStep === 1 && (
         <ConfirmModal
           title="Reset All Data"
-          message="This will permanently delete all studies, patients, providers, rules, and recontact events from the database. This cannot be undone. Are you sure?"
-          confirmLabel={resetting ? 'Resetting…' : 'Delete Everything'}
+          message="This will permanently delete ALL studies, patients, and recontact data. Are you sure?"
+          confirmLabel="Continue"
           danger
-          onConfirm={handleReset}
-          onCancel={() => setResetConfirm(false)}
+          onConfirm={() => { setResetStep(2); setResetInput(''); }}
+          onCancel={() => setResetStep(0)}
         />
+      )}
+      {resetStep === 2 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <h2 className="text-lg font-bold text-red-700">Final Confirmation</h2>
+            <p className="text-sm text-gray-600">
+              This action is irreversible. Type <strong className="font-mono text-red-700">RESET</strong> to confirm.
+            </p>
+            <input
+              type="text"
+              value={resetInput}
+              onChange={e => setResetInput(e.target.value)}
+              placeholder="Type RESET"
+              autoFocus
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-red-500"
+            />
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => { setResetStep(0); setResetInput(''); }}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReset}
+                disabled={resetInput !== 'RESET' || resetting}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {resetting ? 'Resetting…' : 'Delete Everything'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

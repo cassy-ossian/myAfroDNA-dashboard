@@ -468,16 +468,15 @@ export async function importFullWorkbook(studiesData) {
     // Upsert patients
     await importPatients(studyId, rows);
   }
-  // Refresh studies from DB
-  const { data } = await supabase.from('studies').select('*').order('id');
-  const studies = Object.fromEntries((data ?? []).map(s => [s.id, dbStudyToStore(s)]));
-  setState({ studies });
-
   // Run active rules for newly imported studies and return results
   const ruleResults = {};
   for (const { studyId } of studiesData) {
     ruleResults[studyId] = await runRulesForStudy(studyId);
   }
+
+  // Full refresh so dashboard and sidebar reflect all newly imported studies/patients
+  await loadFromSupabase();
+
   return ruleResults;
 }
 
@@ -1044,12 +1043,8 @@ export async function updateUserStudies(userId, assignedStudies) {
   return updated;
 }
 
-export async function inviteUser(email, name) {
-  const tempPassword = crypto.randomUUID().slice(0, 12);
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password: tempPassword,
-  });
+export async function createUserAccount(email, name, password) {
+  const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw error;
 
   // Create profile row for the new user
@@ -1063,7 +1058,34 @@ export async function inviteUser(email, name) {
     await loadProfiles();
   }
 
-  return { user: data.user, tempPassword };
+  return { user: data.user, email, password };
+}
+
+// ── Delete a single study and all its dependent data ────────────────────────
+
+export async function deleteStudy(studyId) {
+  // 1. Get patient UUIDs for this study (needed for notes/events cascade)
+  const { data: patRows, error: patErr } = await supabase
+    .from('patients').select('id').eq('study_id', studyId);
+  if (patErr) throw patErr;
+  const patientIds = (patRows ?? []).map(p => p.id);
+
+  // 2. Delete in FK order: notes → events → patients → rules → study
+  if (patientIds.length > 0) {
+    const { error: noteErr } = await supabase.from('notes').delete().in('patient_id', patientIds);
+    if (noteErr) throw noteErr;
+    const { error: evErr } = await supabase.from('recontact_events').delete().in('patient_id', patientIds);
+    if (evErr) throw evErr;
+    const { error: pDelErr } = await supabase.from('patients').delete().eq('study_id', studyId);
+    if (pDelErr) throw pDelErr;
+  }
+  const { error: ruleErr } = await supabase.from('recontact_rules').delete().eq('study_id', studyId);
+  if (ruleErr) throw ruleErr;
+  const { error: studyErr } = await supabase.from('studies').delete().eq('id', studyId);
+  if (studyErr) throw studyErr;
+
+  // 3. Refresh local cache
+  await loadFromSupabase();
 }
 
 // ── Reset — wipe all data from Supabase and clear local cache ────────────────

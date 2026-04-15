@@ -18,14 +18,31 @@ function detectHeaderRows(rows) {
   return 1; // default
 }
 
+// Normalize a cell value: treat empty strings, '-', '—', 'n/a', 'na' as null.
+function cleanCell(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (t === '' || t === '-' || t === '—' || t === '–') return null;
+    if (/^(n\/a|na|none|null)$/i.test(t)) return null;
+    return t;
+  }
+  return v;
+}
+
 function parseSheet(workbook, sheetName, headerRows = 1) {
   const ws = workbook.Sheets[sheetName];
-  // Read raw to detect header rows, then re-read with proper header offset
-  const raw = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false });
+  if (!ws) return [];
+  // sheet_to_json with defval: null pads short rows so every row has the same keys
+  const raw = XLSX.utils.sheet_to_json(ws, { defval: null, raw: false, blankrows: false });
   if (raw.length === 0) return [];
-  if (headerRows <= 1) return raw;
-  // For multi-row headers: skip extra header rows
-  return raw.slice(headerRows - 1);
+  const sliced = headerRows <= 1 ? raw : raw.slice(headerRows - 1);
+  // Clean every cell
+  return sliced.map(row => {
+    const out = {};
+    for (const [k, v] of Object.entries(row)) out[k] = cleanCell(v);
+    return out;
+  });
 }
 
 function guessStudyId(sheetName) {
@@ -243,46 +260,88 @@ export default function WorkbookImport({ onClose, onImported }) {
   const handleImport = useCallback(async () => {
     setError('');
     setStep(3);
-    try {
-      const studiesData = Object.entries(sheetConfig)
-        .filter(([, cfg]) => cfg?.selected)
-        .map(([sheetName, cfg]) => {
-          const rows = parseSheet(workbook, sheetName, cfg.headerRows);
-          // Normalise column names: trim whitespace, replace spaces with camelCase
-          const normalised = rows.map(row => {
-            const out = {};
-            for (const [k, v] of Object.entries(row)) {
-              const key = k.trim()
-                .replace(/\s+(.)/g, (_, c) => c.toUpperCase())
-                .replace(/^./, c => c.toLowerCase());
-              out[key] = v;
-            }
-            // Ensure 'id' field exists
-            if (!out.id && (out.ID || out.patientId || out.participantId)) {
-              out.id = out.ID ?? out.patientId ?? out.participantId;
-            }
-            return out;
-          }).filter(r => r.id); // drop rows with no ID
 
-          return {
-            studyId: cfg.studyId || guessStudyId(sheetName),
-            studyMeta: {
-              name:        cfg.studyName || sheetName,
-              shortName:   cfg.studyId || guessStudyId(sheetName),
-              category:    inferCategory(cfg.studyId || guessStudyId(sheetName)),
-              description: '',
-              hasCYP2C19:  rows.some(r => r.genotype || r.Genotype),
-              hasContactInfo: rows.some(r => r.phone || r.Phone || r.email || r.Email),
-              headers:     rows.length > 0 ? Object.keys(rows[0]) : [],
-              headerRows:  cfg.headerRows,
-              createdAt:   new Date().toISOString().split('T')[0],
-            },
-            rows: normalised,
-          };
+    const studiesData = [];
+    const sheetErrors = [];
+
+    for (const [sheetName, cfg] of Object.entries(sheetConfig)) {
+      if (!cfg?.selected) continue;
+      const studyId = cfg.studyId || guessStudyId(sheetName);
+
+      try {
+        const rows = parseSheet(workbook, sheetName, cfg.headerRows);
+
+        if (rows.length === 0) {
+          sheetErrors.push(`${sheetName}: no data rows found after row ${cfg.headerRows}.`);
+          continue;
+        }
+
+        // Normalise column names: camelCase, trimmed
+        const normalised = rows.map(row => {
+          const out = {};
+          for (const [k, v] of Object.entries(row)) {
+            if (!k) continue;
+            const key = k.trim()
+              .replace(/\s+(.)/g, (_, c) => c.toUpperCase())
+              .replace(/^./, c => c.toLowerCase());
+            out[key] = v;
+          }
+          // Ensure 'id' field exists
+          if (!out.id && (out.ID || out.patientId || out.participantId)) {
+            out.id = out.ID ?? out.patientId ?? out.participantId;
+          }
+          return out;
         });
 
-      const ruleResults = await importFullWorkbook(studiesData);
+        const withId = normalised.filter(r => r.id);
 
+        if (withId.length === 0) {
+          sheetErrors.push(
+            `${sheetName}: could not find an 'id' / 'patientId' / 'participantId' column — ` +
+            `detected headers: ${rows.length > 0 ? Object.keys(rows[0]).slice(0, 8).join(', ') : '(none)'}`
+          );
+          continue;
+        }
+
+        const droppedCount = normalised.length - withId.length;
+        if (droppedCount > 0) {
+          console.warn(`[WorkbookImport] ${sheetName}: dropped ${droppedCount} row(s) without id`);
+        }
+
+        studiesData.push({
+          studyId,
+          studyMeta: {
+            name:        cfg.studyName || sheetName,
+            shortName:   studyId,
+            category:    inferCategory(studyId),
+            description: '',
+            hasCYP2C19:  rows.some(r => r.genotype || r.Genotype),
+            hasContactInfo: rows.some(r => r.phone || r.Phone || r.email || r.Email),
+            headers:     rows.length > 0 ? Object.keys(rows[0]) : [],
+            headerRows:  cfg.headerRows,
+            createdAt:   new Date().toISOString().split('T')[0],
+          },
+          rows: withId,
+        });
+      } catch (err) {
+        sheetErrors.push(`${sheetName}: ${err.message ?? 'parse failed'}`);
+      }
+    }
+
+    if (sheetErrors.length > 0) {
+      setError(sheetErrors.join('\n'));
+      setStep(2);
+      return;
+    }
+
+    if (studiesData.length === 0) {
+      setError('No sheets with importable data were found.');
+      setStep(2);
+      return;
+    }
+
+    try {
+      const ruleResults = await importFullWorkbook(studiesData);
       const totalPatients = studiesData.reduce((n, s) => n + s.rows.length, 0);
       const newlyFlagged = Object.values(ruleResults ?? {}).reduce((sum, r) => sum + (r?.newlyFlagged ?? 0), 0);
       const studiesWithRules = Object.values(ruleResults ?? {}).filter(r => (r?.newlyFlagged ?? 0) + (r?.alreadyFlagged ?? 0) + (r?.noMatch ?? 0) > 0).length;
@@ -290,7 +349,8 @@ export default function WorkbookImport({ onClose, onImported }) {
       setStep(4);
       onImported?.();
     } catch (err) {
-      setError(err.message ?? 'Import failed');
+      console.error('[WorkbookImport] importFullWorkbook failed:', err);
+      setError(`Database import failed: ${err.message ?? 'unknown error'}`);
       setStep(2);
     }
   }, [workbook, sheetConfig, onImported]);
@@ -339,7 +399,7 @@ export default function WorkbookImport({ onClose, onImported }) {
           {error && (
             <div className="mb-4 flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">
               <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-              {error}
+              <div className="whitespace-pre-line">{error}</div>
             </div>
           )}
 

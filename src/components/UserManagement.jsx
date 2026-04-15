@@ -1,22 +1,26 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Users, UserPlus, Copy, CheckCircle, AlertCircle } from 'lucide-react';
 import useAppStore from '../store/appStore';
-import { updateUserRole, updateUserStudies, inviteUser, loadProfiles } from '../services/dataService';
+import { updateUserRole, updateUserStudies, createUserAccount, loadProfiles } from '../services/dataService';
 
 const ROLES = ['admin', 'coordinator', 'provider'];
 
 export default function UserManagement() {
   const profiles = useAppStore(s => s.profiles);
   const studies  = useAppStore(s => s.studies);
+
+  // Fetch profiles on mount in case the initial load returned empty
+  useEffect(() => { loadProfiles(); }, []);
   const user     = useAppStore(s => s.user);
 
   const [showInvite, setShowInvite]     = useState(false);
   const [inviteEmail, setInviteEmail]   = useState('');
   const [inviteName, setInviteName]     = useState('');
+  const [invitePass, setInvitePass]     = useState('');
   const [inviting, setInviting]         = useState(false);
   const [inviteResult, setInviteResult] = useState(null);
   const [inviteError, setInviteError]   = useState(null);
-  const [copied, setCopied]             = useState(false);
+  const [copied, setCopied]             = useState('');
   const [error, setError]               = useState(null);
 
   const studyList = useMemo(
@@ -49,25 +53,38 @@ export default function UserManagement() {
 
   const handleInvite = async (e) => {
     e.preventDefault();
+    if (invitePass.length < 6) {
+      setInviteError('Password must be at least 6 characters.');
+      return;
+    }
     setInviting(true);
     setInviteError(null);
     setInviteResult(null);
     try {
-      const result = await inviteUser(inviteEmail, inviteName);
+      const result = await createUserAccount(inviteEmail, inviteName, invitePass);
       setInviteResult(result);
       setInviteEmail('');
       setInviteName('');
+      setInvitePass('');
     } catch (err) {
       setInviteError(err.message);
     }
     setInviting(false);
   };
 
-  const copyPassword = async () => {
-    if (!inviteResult?.tempPassword) return;
-    await navigator.clipboard.writeText(inviteResult.tempPassword);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyValue = async (value, key) => {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setCopied(key);
+    setTimeout(() => setCopied(''), 2000);
+  };
+
+  const copyBoth = async () => {
+    if (!inviteResult) return;
+    const text = `Email: ${inviteResult.email}\nTemporary Password: ${inviteResult.password}`;
+    await navigator.clipboard.writeText(text);
+    setCopied('both');
+    setTimeout(() => setCopied(''), 2000);
   };
 
   return (
@@ -82,7 +99,7 @@ export default function UserManagement() {
           onClick={() => { setShowInvite(true); setInviteResult(null); setInviteError(null); }}
           className="flex items-center gap-2 px-4 py-2 bg-teal-700 text-white rounded-xl text-sm font-semibold hover:bg-teal-800 transition-colors"
         >
-          <UserPlus size={15} /> Invite User
+          <UserPlus size={15} /> Create User
         </button>
       </div>
 
@@ -177,39 +194,68 @@ export default function UserManagement() {
         </div>
       </div>
 
-      {/* Invite modal */}
+      {/* Create account modal */}
       {showInvite && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
-            <h2 className="text-lg font-bold text-gray-900">Invite New User</h2>
+            <h2 className="text-lg font-bold text-gray-900">Create User Account</h2>
 
             {inviteResult ? (
               <div className="space-y-4">
                 <div className="flex items-start gap-2 p-3 bg-teal-50 border border-teal-200 rounded-lg text-sm text-teal-800">
                   <CheckCircle size={15} className="shrink-0 mt-0.5" />
-                  User invited successfully!
+                  <div>
+                    <p className="font-semibold">Account created.</p>
+                    <p className="text-xs mt-0.5">Share these credentials with the user directly — no email will be sent.</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Email</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 px-3 py-2 bg-gray-100 rounded-lg text-sm font-mono select-all break-all">
+                      {inviteResult.email}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => copyValue(inviteResult.email, 'email')}
+                      className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
+                    >
+                      {copied === 'email' ? <CheckCircle size={16} className="text-teal-600" /> : <Copy size={16} />}
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Temporary Password</p>
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 px-3 py-2 bg-gray-100 rounded-lg text-sm font-mono select-all">
-                      {inviteResult.tempPassword}
+                    <code className="flex-1 px-3 py-2 bg-gray-100 rounded-lg text-sm font-mono select-all break-all">
+                      {inviteResult.password}
                     </code>
                     <button
-                      onClick={copyPassword}
+                      type="button"
+                      onClick={() => copyValue(inviteResult.password, 'password')}
                       className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
                     >
-                      {copied ? <CheckCircle size={16} className="text-teal-600" /> : <Copy size={16} />}
+                      {copied === 'password' ? <CheckCircle size={16} className="text-teal-600" /> : <Copy size={16} />}
                     </button>
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">Share this with the user. They should change it on first login.</p>
+                  <p className="text-xs text-gray-400 mt-1">The user should change it on first login.</p>
                 </div>
-                <button
-                  onClick={() => setShowInvite(false)}
-                  className="w-full px-4 py-2 bg-teal-700 text-white rounded-lg text-sm font-semibold hover:bg-teal-800 transition-colors"
-                >
-                  Done
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={copyBoth}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                  >
+                    {copied === 'both' ? <><CheckCircle size={14} className="text-teal-600" /> Copied</> : <><Copy size={14} /> Copy Both</>}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowInvite(false)}
+                    className="flex-1 px-4 py-2 bg-teal-700 text-white rounded-lg text-sm font-semibold hover:bg-teal-800 transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
               </div>
             ) : (
               <form onSubmit={handleInvite} className="space-y-3">
@@ -240,6 +286,18 @@ export default function UserManagement() {
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Temporary Password</label>
+                  <input
+                    type="text"
+                    required
+                    value={invitePass}
+                    onChange={e => setInvitePass(e.target.value)}
+                    placeholder="Min 6 characters"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">You'll share this with the user yourself.</p>
+                </div>
                 <div className="flex gap-2 pt-2">
                   <button
                     type="button"
@@ -250,10 +308,10 @@ export default function UserManagement() {
                   </button>
                   <button
                     type="submit"
-                    disabled={inviting || !inviteEmail}
+                    disabled={inviting || !inviteEmail || !invitePass}
                     className="flex-1 px-4 py-2 bg-teal-700 text-white rounded-lg text-sm font-semibold hover:bg-teal-800 disabled:opacity-50 transition-colors"
                   >
-                    {inviting ? 'Inviting...' : 'Send Invite'}
+                    {inviting ? 'Creating…' : 'Create Account'}
                   </button>
                 </div>
               </form>
