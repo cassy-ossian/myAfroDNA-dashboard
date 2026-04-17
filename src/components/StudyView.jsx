@@ -1,11 +1,13 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Search, ChevronUp, ChevronDown, AlertTriangle, Dna, Phone, BookOpen, Play, Settings, Loader2, Download, Trash2, Check, X, Lock } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, AlertTriangle, Dna, Phone, BookOpen, Play, Settings, Loader2, Download, Trash2, Lock, Plus, Eye, EyeOff } from 'lucide-react';
 import { getRulesForStudy, runRulesForStudy } from '../services/rulesEngine';
 import StudyBadge from './StudyBadge';
 import PathwayBadge from './PathwayBadge';
 import BatchActionBar from './BatchActionBar';
 import FlagForRecontactModal from './FlagForRecontactModal';
-import { manuallyFlagPatients, bulkAssignProvider, deleteStudy, updatePatient } from '../services/dataService';
+import BulkEditModal from './BulkEditModal';
+import EditableCell from './EditableCell';
+import { manuallyFlagPatients, bulkAssignProvider, deleteStudy, updatePatient, bulkUpdatePatients, addStudyColumn } from '../services/dataService';
 import { exportPatientList } from '../utils/excelExport';
 import useAppStore from '../store/appStore';
 
@@ -63,81 +65,8 @@ function CellValue({ field, value, patient }) {
   return <span className="text-gray-700">{String(value)}</span>;
 }
 
-// Inline editable table cell. Shows CellValue in read mode; on click turns into
-// an input. Saves on Enter or blur; Esc cancels. Shows a brief check/× after save.
-const NON_EDITABLE_FIELDS = new Set(['id', 'flagged', 'priority', 'phenotype', 'implication', 'suggestedAction']);
-
-function EditableCell({ field, value, patient, readOnly, onSave }) {
-  const [editing, setEditing] = useState(false);
-  const [draft,   setDraft]   = useState('');
-  const [status,  setStatus]  = useState(null); // 'saving' | 'ok' | 'err' | null
-
-  const canEdit = !readOnly && !NON_EDITABLE_FIELDS.has(field);
-
-  const beginEdit = (e) => {
-    if (!canEdit) return;
-    e.stopPropagation();
-    setDraft(value == null ? '' : String(value));
-    setEditing(true);
-  };
-
-  const commit = async () => {
-    setEditing(false);
-    if (String(value ?? '') === draft) return;
-    setStatus('saving');
-    try {
-      // Parse booleans for yes/no fields
-      let parsed = draft.trim();
-      if (parsed === '') parsed = null;
-      else if (field === 'sampleCollected' || field === 'genotypingComplete') {
-        parsed = /^(yes|y|true|1)$/i.test(parsed);
-      } else if (field === 'age') {
-        const n = Number(parsed);
-        if (!Number.isNaN(n)) parsed = n;
-      }
-      await onSave(patient.id, field, parsed);
-      setStatus('ok');
-      setTimeout(() => setStatus(null), 1500);
-    } catch (err) {
-      console.error('[EditableCell] save failed:', err);
-      setStatus('err');
-      setTimeout(() => setStatus(null), 2500);
-    }
-  };
-
-  if (editing) {
-    return (
-      <input
-        autoFocus
-        type="text"
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => {
-          if (e.key === 'Enter') { e.preventDefault(); commit(); }
-          if (e.key === 'Escape') { e.preventDefault(); setEditing(false); }
-        }}
-        onClick={e => e.stopPropagation()}
-        className="w-full border border-teal-500 rounded px-1.5 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
-      />
-    );
-  }
-
-  return (
-    <div
-      onClick={beginEdit}
-      className={`flex items-center gap-1 ${canEdit ? 'hover:bg-teal-50 rounded px-1 -mx-1' : ''}`}
-      title={canEdit ? 'Click to edit' : undefined}
-    >
-      <div className="flex-1 min-w-0 truncate">
-        <CellValue field={field} value={value} patient={patient} />
-      </div>
-      {status === 'saving' && <Loader2 size={11} className="animate-spin text-gray-400 shrink-0" />}
-      {status === 'ok'     && <Check    size={11} className="text-teal-600 shrink-0" />}
-      {status === 'err'    && <X        size={11} className="text-red-600 shrink-0" />}
-    </div>
-  );
-}
+// CellValue is the read-mode renderer passed into EditableCell. It handles
+// icons / formatting specific to this table (flag markers, phone icon, etc.).
 
 function RulesSummary({ studyId, onManageRules }) {
   const [rules,        setRules]        = useState([]);
@@ -281,6 +210,19 @@ export default function StudyView({ study, patients, studies, providers, onSelec
   }, [study, onNavigate]);
 
   const columns = useMemo(() => {
+    let base;
+    if (study?.headers?.length) base = study.headers.filter(h => !HIDDEN_COLS.has(h));
+    else if (patients.length === 0) base = ['id'];
+    else {
+      const allKeys = new Set();
+      for (const p of patients.slice(0, 20)) Object.keys(p).forEach(k => allKeys.add(k));
+      base = [...allKeys].filter(k => !HIDDEN_COLS.has(k));
+    }
+    // Filter out session-hidden columns
+    return base.filter(k => !hiddenForStudy.includes(k));
+  }, [study, patients, hiddenForStudy]);
+
+  const allStudyColumns = useMemo(() => {
     if (study?.headers?.length) return study.headers.filter(h => !HIDDEN_COLS.has(h));
     if (patients.length === 0) return ['id'];
     const allKeys = new Set();
@@ -329,6 +271,57 @@ export default function StudyView({ study, patients, studies, providers, onSelec
     await bulkAssignProvider(ids, providerName);
     setSelected(new Set());
   }, []);
+
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+
+  const handleBulkEditConfirm = useCallback(async (field, value) => {
+    const ids = [...selected];
+    await bulkUpdatePatients(ids, { [field]: value });
+    setBulkEditOpen(false);
+    setSelected(new Set());
+  }, [selected]);
+
+  // Custom column modal
+  const [addColOpen, setAddColOpen] = useState(false);
+  const [newColName, setNewColName] = useState('');
+  const [newColType, setNewColType] = useState('text');
+  const [addingCol,  setAddingCol]  = useState(false);
+  const [addColError, setAddColError] = useState(null);
+
+  const handleAddColumn = async (e) => {
+    e.preventDefault();
+    if (!newColName.trim()) return;
+    setAddingCol(true);
+    setAddColError(null);
+    try {
+      // Normalise to camelCase key for consistency with imported fields
+      const key = newColName.trim()
+        .replace(/\s+(.)/g, (_, c) => c.toUpperCase())
+        .replace(/^./, c => c.toLowerCase());
+      await addStudyColumn(study.id, { key, label: newColName.trim(), type: newColType });
+      setAddingCol(false);
+      setAddColOpen(false);
+      setNewColName('');
+      setNewColType('text');
+    } catch (err) {
+      setAddColError(err.message ?? 'Failed to add column');
+      setAddingCol(false);
+    }
+  };
+
+  // Column visibility (session-level, stored in Zustand)
+  const hiddenColumnsByStudy = useAppStore(s => s.hiddenColumnsByStudy);
+  const setHiddenColumnsByStudy = useAppStore(s => s.setHiddenColumnsByStudy);
+  const hiddenForStudy = hiddenColumnsByStudy?.[study?.id] ?? [];
+  const toggleHideColumn = (col) => {
+    const next = hiddenForStudy.includes(col)
+      ? hiddenForStudy.filter(c => c !== col)
+      : [...hiddenForStudy, col];
+    setHiddenColumnsByStudy({ ...(hiddenColumnsByStudy ?? {}), [study.id]: next });
+  };
+
+  // Column header menu state
+  const [openMenuCol, setOpenMenuCol] = useState(null);
 
   if (!study) return <div className="p-8 text-center text-gray-400"><p>Study not found.</p></div>;
 
@@ -415,12 +408,30 @@ export default function StudyView({ study, patients, studies, providers, onSelec
         />
       )}
 
-      {/* Search */}
-      <div className="relative max-w-sm">
-        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input type="text" placeholder="Search patients…" value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1); }}
-          className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+      {/* Search + column actions */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input type="text" placeholder="Search patients…" value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500" />
+        </div>
+        {canEdit && (
+          <button
+            onClick={() => { setAddColOpen(true); setNewColName(''); setNewColType('text'); setAddColError(null); }}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-teal-700 border border-teal-300 rounded-lg hover:bg-teal-50 transition-colors"
+          >
+            <Plus size={14} /> Add Column
+          </button>
+        )}
+        {hiddenForStudy.length > 0 && (
+          <button
+            onClick={() => setHiddenColumnsByStudy({ ...(hiddenColumnsByStudy ?? {}), [study.id]: [] })}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <Eye size={14} /> Show all ({hiddenForStudy.length} hidden)
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -439,9 +450,38 @@ export default function StudyView({ study, patients, studies, providers, onSelec
                       className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 cursor-pointer" />
                   </th>
                   {columns.map(col => (
-                    <th key={col} onClick={() => toggleSort(col)}
-                      className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700 select-none whitespace-nowrap">
-                      <span className="flex items-center gap-1">{LABELS[col] ?? col}<SortIcon field={col} sort={sort} /></span>
+                    <th key={col}
+                      className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider select-none whitespace-nowrap relative">
+                      <div className="flex items-center gap-1">
+                        <span
+                          onClick={() => toggleSort(col)}
+                          className="flex items-center gap-1 cursor-pointer hover:text-gray-700"
+                        >
+                          {LABELS[col] ?? col}<SortIcon field={col} sort={sort} />
+                        </span>
+                        {col !== 'id' && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setOpenMenuCol(openMenuCol === col ? null : col); }}
+                            className="ml-1 p-0.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600"
+                            aria-label="Column menu"
+                          >
+                            <ChevronDown size={11} />
+                          </button>
+                        )}
+                      </div>
+                      {openMenuCol === col && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setOpenMenuCol(null)} />
+                          <div className="absolute top-full left-0 mt-1 z-50 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px]">
+                            <button
+                              onClick={() => { toggleHideColumn(col); setOpenMenuCol(null); }}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 normal-case tracking-normal"
+                            >
+                              <EyeOff size={12} /> Hide Column
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </th>
                   ))}
                   {study.hasContactInfo && (
@@ -477,6 +517,7 @@ export default function StudyView({ study, patients, studies, providers, onSelec
                               patient={p}
                               readOnly={readOnly}
                               onSave={handleCellSave}
+                              renderValue={(v, pt, f) => <CellValue field={f} value={v} patient={pt} />}
                             />
                           </td>
                         );
@@ -518,13 +559,91 @@ export default function StudyView({ study, patients, studies, providers, onSelec
         providers={providers ?? []}
         onFlag={pts => setFlagModal({ patients: pts })}
         onAssignProvider={(ids, name) => handleBulkAssign(ids, name)}
-        onExport={() => {}}
+        onBulkEdit={canEdit ? () => setBulkEditOpen(true) : undefined}
+        onExport={(selectedPts) => {
+          const dateStr = new Date().toISOString().split('T')[0];
+          exportPatientList(selectedPts, {
+            filename: `MyAfroDNA_${(study.shortName || study.id).replace(/[^a-zA-Z0-9]/g, '_')}Export${dateStr}.xlsx`,
+            recontactCases,
+            providerAssignments,
+            studyHeaders: study.headers ?? null,
+            includeStudyCol: false,
+          });
+        }}
         onClear={() => setSelected(new Set())}
       />
 
       {/* Flag modal */}
       {flagModal && (
         <FlagForRecontactModal patients={flagModal.patients} onConfirm={handleFlagConfirm} onCancel={() => setFlagModal(false)} />
+      )}
+
+      {/* Bulk edit modal */}
+      {bulkEditOpen && (
+        <BulkEditModal
+          patients={patients.filter(p => selected.has(p.id))}
+          onConfirm={handleBulkEditConfirm}
+          onClose={() => setBulkEditOpen(false)}
+        />
+      )}
+
+      {/* Add column modal */}
+      {addColOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <h2 className="text-lg font-bold text-gray-900">Add Column</h2>
+            <form onSubmit={handleAddColumn} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Column Name</label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={newColName}
+                  onChange={e => setNewColName(e.target.value)}
+                  placeholder="e.g. Blood Pressure"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Column Type</label>
+                <select
+                  value={newColType}
+                  onChange={e => setNewColType(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                >
+                  <option value="text">Text</option>
+                  <option value="number">Number</option>
+                  <option value="date">Date</option>
+                  <option value="boolean">Yes / No</option>
+                </select>
+              </div>
+              {addColError && (
+                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                  <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+                  {addColError}
+                </div>
+              )}
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAddColOpen(false)}
+                  disabled={addingCol}
+                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={addingCol || !newColName.trim()}
+                  className="flex-1 px-4 py-2 bg-teal-700 text-white rounded-lg text-sm font-semibold hover:bg-teal-800 disabled:opacity-50 transition-colors"
+                >
+                  {addingCol ? 'Adding…' : 'Add Column'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Delete study confirmation */}

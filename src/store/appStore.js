@@ -18,6 +18,11 @@ const useAppStore = create((set, get) => ({
   patientNotes:        {},
   visibleColumns:      null,
   rules:               [],   // all recontact_rules from Supabase
+
+  // ── Session-only UI state (not persisted) ─────────────────
+  // Per-study column hide list: { [studyId]: ['columnKey', ...] }
+  hiddenColumnsByStudy: {},
+  setHiddenColumnsByStudy: (next) => set({ hiddenColumnsByStudy: next }),
 }));
 
 export default useAppStore;

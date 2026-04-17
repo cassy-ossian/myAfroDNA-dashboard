@@ -69,15 +69,14 @@ function NavContent({ activeScreen, activeStudyId, onNavigate, flaggedCount, stu
     <nav className="flex flex-col h-full">
       {/* Brand — clickable, navigates to Dashboard */}
       <div className="px-4 py-5 border-b border-teal-800">
-        <a
-          href="https://myafrodna.com/"
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          type="button"
+          onClick={() => { onNavigate('dashboard'); onClose?.(); }}
           className="block w-full cursor-pointer text-center"
         >
           <img src={logoImg} alt="MyAfroDNA" className="h-10 w-auto mx-auto" />
           <p className="text-teal-400 text-[10px] mt-1">Genomic Medicine Platform</p>
-        </a>
+        </button>
       </div>
 
       {/* Scrollable nav area */}

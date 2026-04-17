@@ -6,16 +6,66 @@ import { importFullWorkbook } from '../services/dataService';
 
 // ── Step 1 helpers ─────────────────────────────────────────────────────────────
 
-function detectHeaderRows(rows) {
-  // Heuristic: if row[0] values are all strings and row[1] has mixed types, row count = 1.
-  // If row[0] looks merged/empty try row[1] as the real header row.
-  if (!rows || rows.length < 2) return 1;
-  const first  = rows[0];
-  const second = rows[1];
-  const firstAllStr  = Object.values(first).every(v => typeof v === 'string' || v == null);
-  const secondHasNum = Object.values(second).some(v => typeof v === 'number');
-  if (firstAllStr && secondHasNum) return 1;
-  return 1; // default
+// Score how "data-like" a row is — used to pick the right header row count.
+// Rows with numbers, dates, ID codes (e.g. "CLP-001"), or short strings score higher.
+function scoreAsDataRow(row) {
+  if (!row) return 0;
+  const values = Object.values(row).filter(v => v !== null && v !== undefined && v !== '');
+  if (values.length === 0) return 0;
+  let score = 0;
+  for (const v of values) {
+    if (typeof v === 'number' || v instanceof Date) score += 2;
+    else if (typeof v === 'string') {
+      const t = v.trim();
+      if (/^\*?[0-9*\/\-.:_]+\*?$/.test(t)) score += 2;                   // codes like *2/*2, CLP-001
+      else if (/\d{1,4}[\/\-]\d{1,2}[\/\-]\d{1,4}/.test(t)) score += 2;   // dates
+      else if (/^\d+(\.\d+)?$/.test(t)) score += 2;                       // numeric strings
+      else if (t.length <= 4) score += 1;                                 // short codes (M, F, Yes)
+      // longer strings get 0 — likely field labels, e.g. "Date of Birth"
+    }
+  }
+  return score / values.length;
+}
+
+// Try 1, 2, 3 header-row counts; pick whichever makes the first data row look most data-like.
+function detectHeaderRows(workbook, sheetName) {
+  let best = 1, bestScore = -1;
+  for (const hr of [1, 2, 3]) {
+    const rows = parseSheet(workbook, sheetName, hr);
+    if (rows.length === 0) continue;
+    const score = scoreAsDataRow(rows[0]);
+    if (score > bestScore) { bestScore = score; best = hr; }
+  }
+  return best;
+}
+
+// Common names for the patient ID column. Normalised to lowercase with no
+// whitespace/punctuation for robust matching against real-world header names.
+const ID_COLUMN_NAMES = [
+  'id', 'patientid', 'participantid', 'subjectid', 'sampleid',
+  'myafrodnanumber', 'myafrodnanum', 'myafrodna',
+  'serialnumber', 'serialnum', 'serial',
+  'tubenumber', 'tubeno', 'tube',
+];
+
+function normaliseHeader(s) {
+  return String(s ?? '').toLowerCase().replace(/[\s._\-]+/g, '').replace(/[^\w]/g, '');
+}
+
+function detectIdColumn(headers) {
+  if (!headers || headers.length === 0) return null;
+  // Exact match first
+  for (const h of headers) {
+    if (ID_COLUMN_NAMES.includes(normaliseHeader(h))) return h;
+  }
+  // Prefix match: "myafrodnanumber" header when pattern is "myafrodna"
+  for (const h of headers) {
+    const n = normaliseHeader(h);
+    for (const p of ID_COLUMN_NAMES) {
+      if (p.length >= 4 && (n.startsWith(p) || n.endsWith(p))) return h;
+    }
+  }
+  return null;
 }
 
 // Normalize a cell value: treat empty strings, '-', '—', 'n/a', 'na' as null.
@@ -102,29 +152,57 @@ function Step2SelectSheets({ workbook, fileName, sheetConfig, onChange, onNext, 
       if (next[name]) {
         delete next[name];
       } else {
-        const preview  = parseSheet(workbook, name, 1).slice(0, 3);
-        const headerRows = detectHeaderRows([...parseSheet(workbook, name, 1)]);
+        const headerRows    = detectHeaderRows(workbook, name);
+        const rows          = parseSheet(workbook, name, headerRows);
+        const preview       = rows.slice(0, 3);
+        const headers       = rows.length > 0 ? Object.keys(rows[0]) : [];
+        const detectedId    = detectIdColumn(headers);
         next[name] = {
           selected: true,
           studyId:  guessStudyId(name),
           studyName: name,
           headerRows,
+          headerRowsWasAutoDetected: true,
           preview,
-          rawCount: parseSheet(workbook, name, 1).length,
+          headers,
+          idColumn:         detectedId,  // null if auto-detect failed — user must pick manually
+          detectedIdColumn: detectedId,  // tracks whether we found one automatically
+          rawCount: rows.length,
         };
       }
       return next;
     });
   };
 
+  // Re-parse the sheet when headerRows changes so preview / headers / idColumn update
   const updateField = (name, field, value) => {
-    onChange(prev => ({
-      ...prev,
-      [name]: { ...prev[name], [field]: value },
-    }));
+    onChange(prev => {
+      const current = prev[name];
+      if (!current) return prev;
+      const updated = { ...current, [field]: value };
+      if (field === 'headerRows') {
+        const rows     = parseSheet(workbook, name, value);
+        const headers  = rows.length > 0 ? Object.keys(rows[0]) : [];
+        updated.preview  = rows.slice(0, 3);
+        updated.headers  = headers;
+        updated.rawCount = rows.length;
+        // Re-detect id column with the new headers; preserve user's manual choice if still valid
+        const autoDetected = detectIdColumn(headers);
+        if (!headers.includes(current.idColumn)) {
+          updated.idColumn = autoDetected;
+        }
+        updated.detectedIdColumn = autoDetected;
+        updated.headerRowsWasAutoDetected = false; // user has now touched it
+      }
+      return { ...prev, [name]: updated };
+    });
   };
 
-  const selectedCount = Object.values(sheetConfig).filter(c => c?.selected).length;
+  const selectedCount   = Object.values(sheetConfig).filter(c => c?.selected).length;
+  const missingIdSheets = Object.entries(sheetConfig)
+    .filter(([, c]) => c?.selected && !c?.idColumn)
+    .map(([n]) => n);
+  const canProceed      = selectedCount > 0 && missingIdSheets.length === 0;
 
   return (
     <div className="space-y-4">
@@ -173,10 +251,16 @@ function Step2SelectSheets({ workbook, fileName, sheetConfig, onChange, onNext, 
                         onChange={e => updateField(name, 'headerRows', Number(e.target.value))}
                         className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                       >
-                        <option value={1}>1 (default)</option>
+                        <option value={1}>1</option>
                         <option value={2}>2</option>
                         <option value={3}>3</option>
                       </select>
+                      {cfg.headerRowsWasAutoDetected && (
+                        <p className="text-[11px] text-gray-500 mt-1">
+                          We detected {cfg.headerRows} header row{cfg.headerRows !== 1 ? 's' : ''}.
+                          If the preview below doesn't look right, adjust this.
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -187,6 +271,35 @@ function Step2SelectSheets({ workbook, fileName, sheetConfig, onChange, onNext, 
                       onChange={e => updateField(name, 'studyName', e.target.value)}
                       className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                     />
+                  </div>
+
+                  {/* Patient ID column selector */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Patient ID Column {!cfg.idColumn && <span className="text-red-600">*</span>}
+                    </label>
+                    {!cfg.detectedIdColumn && (
+                      <p className="text-[11px] text-amber-700 mb-1">
+                        Select the column that contains the unique patient identifier.
+                      </p>
+                    )}
+                    <select
+                      value={cfg.idColumn ?? ''}
+                      onChange={e => updateField(name, 'idColumn', e.target.value || null)}
+                      className={`w-full border rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white ${
+                        cfg.idColumn ? 'border-gray-300' : 'border-red-300'
+                      }`}
+                    >
+                      <option value="">— Select column —</option>
+                      {(cfg.headers ?? []).map(h => (
+                        <option key={h} value={h}>{h}</option>
+                      ))}
+                    </select>
+                    {cfg.detectedIdColumn && cfg.idColumn === cfg.detectedIdColumn && (
+                      <p className="text-[11px] text-teal-700 mt-1">
+                        Auto-detected: <span className="font-mono">{cfg.detectedIdColumn}</span>
+                      </p>
+                    )}
                   </div>
                   {/* Preview first 2 data rows */}
                   {cfg.preview?.length > 0 && (
@@ -223,18 +336,25 @@ function Step2SelectSheets({ workbook, fileName, sheetConfig, onChange, onNext, 
         })}
       </div>
 
-      <div className="flex justify-between pt-2">
+      <div className="flex items-center justify-between pt-2 gap-3">
         <button onClick={onBack} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 rounded-lg hover:bg-gray-100">
           ← Back
         </button>
-        <button
-          onClick={onNext}
-          disabled={selectedCount === 0}
-          className="flex items-center gap-2 px-4 py-2 bg-teal-700 text-white rounded-lg text-sm font-semibold hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          Import {selectedCount} sheet{selectedCount !== 1 ? 's' : ''}
-          <ChevronRight size={15} />
-        </button>
+        <div className="flex items-center gap-3">
+          {missingIdSheets.length > 0 && (
+            <p className="text-xs text-amber-700">
+              Select Patient ID column for: {missingIdSheets.join(', ')}
+            </p>
+          )}
+          <button
+            onClick={onNext}
+            disabled={!canProceed}
+            className="flex items-center gap-2 px-4 py-2 bg-teal-700 text-white rounded-lg text-sm font-semibold hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Import {selectedCount} sheet{selectedCount !== 1 ? 's' : ''}
+            <ChevronRight size={15} />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -268,6 +388,11 @@ export default function WorkbookImport({ onClose, onImported }) {
       if (!cfg?.selected) continue;
       const studyId = cfg.studyId || guessStudyId(sheetName);
 
+      if (!cfg.idColumn) {
+        sheetErrors.push(`${sheetName}: no Patient ID column selected.`);
+        continue;
+      }
+
       try {
         const rows = parseSheet(workbook, sheetName, cfg.headerRows);
 
@@ -276,29 +401,31 @@ export default function WorkbookImport({ onClose, onImported }) {
           continue;
         }
 
-        // Normalise column names: camelCase, trimmed
+        // Normalise column names to camelCase. The user-selected idColumn is
+        // renamed to 'id' (the app's canonical field name).
+        const idColKey = cfg.idColumn;
         const normalised = rows.map(row => {
           const out = {};
           for (const [k, v] of Object.entries(row)) {
             if (!k) continue;
+            if (k === idColKey) {
+              out.id = v;
+              continue;
+            }
             const key = k.trim()
               .replace(/\s+(.)/g, (_, c) => c.toUpperCase())
               .replace(/^./, c => c.toLowerCase());
             out[key] = v;
           }
-          // Ensure 'id' field exists
-          if (!out.id && (out.ID || out.patientId || out.participantId)) {
-            out.id = out.ID ?? out.patientId ?? out.participantId;
-          }
           return out;
         });
 
-        const withId = normalised.filter(r => r.id);
+        const withId = normalised.filter(r => r.id !== null && r.id !== undefined && String(r.id).trim() !== '');
 
         if (withId.length === 0) {
           sheetErrors.push(
-            `${sheetName}: could not find an 'id' / 'patientId' / 'participantId' column — ` +
-            `detected headers: ${rows.length > 0 ? Object.keys(rows[0]).slice(0, 8).join(', ') : '(none)'}`
+            `${sheetName}: the selected ID column "${idColKey}" contains no values. ` +
+            `Check the header row count, or pick a different ID column.`
           );
           continue;
         }

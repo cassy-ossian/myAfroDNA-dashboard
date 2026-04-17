@@ -4,9 +4,11 @@ import StudyBadge from './StudyBadge';
 import PathwayBadge from './PathwayBadge';
 import BatchActionBar from './BatchActionBar';
 import FlagForRecontactModal from './FlagForRecontactModal';
+import BulkEditModal from './BulkEditModal';
 import ColumnManager, { getColumnLabel } from './ColumnManager';
+import EditableCell from './EditableCell';
 import useAppStore from '../store/appStore';
-import { manuallyFlagPatients, bulkAssignProvider, setVisibleColumns } from '../services/dataService';
+import { manuallyFlagPatients, bulkAssignProvider, setVisibleColumns, updatePatient, bulkUpdatePatients } from '../services/dataService';
 import { exportExcel, exportPatientList } from '../utils/excelExport';
 
 const PAGE_SIZE = 50;
@@ -59,6 +61,14 @@ export default function MasterPatientList({ patients, studies, providers, onSele
   const [page,        setPage]        = useState(1);
   const [selected,    setSelected]    = useState(new Set());
   const [flagModal,   setFlagModal]   = useState(false);
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+
+  const userRole = useAppStore(s => s.userRole);
+  const readOnly = userRole === 'provider';
+
+  const handleCellSave = useCallback(async (patientId, field, value) => {
+    await updatePatient(patientId, { [field]: value });
+  }, []);
 
   // Column visibility
   const visibleSet = useMemo(
@@ -165,6 +175,13 @@ export default function MasterPatientList({ patients, studies, providers, onSele
     setSelected(new Set());
   }, []);
 
+  const handleBulkEditConfirm = useCallback(async (field, value) => {
+    const ids = [...selected];
+    await bulkUpdatePatients(ids, { [field]: value });
+    setBulkEditOpen(false);
+    setSelected(new Set());
+  }, [selected]);
+
   const handleExport = useCallback(() => {
     const dateStr = new Date().toISOString().split('T')[0];
     exportPatientList(filtered, {
@@ -265,8 +282,17 @@ export default function MasterPatientList({ patients, studies, providers, onSele
                         <StudyBadge study={p.studyId} studies={studies} size="xs" />
                       </td>
                       {displayCols.filter(c => c.key !== 'id' && c.key !== 'studyId').map(col => (
-                        <td key={col.key} className="px-3 py-2.5 text-gray-600 max-w-36 truncate cursor-pointer" onClick={() => onSelectPatient(p)}>
-                          {p[col.key] != null && p[col.key] !== '' ? String(p[col.key]) : <span className="text-gray-300">—</span>}
+                        <td key={col.key} className="px-3 py-2.5 text-gray-600 max-w-36">
+                          <EditableCell
+                            field={col.key}
+                            value={p[col.key]}
+                            patient={p}
+                            readOnly={readOnly}
+                            onSave={handleCellSave}
+                            renderValue={(v) => v != null && v !== ''
+                              ? <span>{String(v)}</span>
+                              : <span className="text-gray-300">—</span>}
+                          />
                         </td>
                       ))}
                       <td className="px-3 py-2.5 cursor-pointer" onClick={() => onSelectPatient(p)}>
@@ -314,6 +340,7 @@ export default function MasterPatientList({ patients, studies, providers, onSele
         providers={providers}
         onFlag={handleFlag}
         onAssignProvider={(ids, name) => handleBulkAssign(ids, name)}
+        onBulkEdit={readOnly ? undefined : () => setBulkEditOpen(true)}
         onExport={(selectedPts) => {
           const dateStr = new Date().toISOString().split('T')[0];
           exportPatientList(selectedPts, {
@@ -325,6 +352,14 @@ export default function MasterPatientList({ patients, studies, providers, onSele
         }}
         onClear={() => setSelected(new Set())}
       />
+
+      {bulkEditOpen && (
+        <BulkEditModal
+          patients={patients.filter(p => selected.has(p.id))}
+          onConfirm={handleBulkEditConfirm}
+          onClose={() => setBulkEditOpen(false)}
+        />
+      )}
 
       {/* Flag modal */}
       {flagModal && (

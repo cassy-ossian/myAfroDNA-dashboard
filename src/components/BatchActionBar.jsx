@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { X, Flag, UserCheck, Download } from 'lucide-react';
+import { X, Flag, UserCheck, Download, Edit3 } from 'lucide-react';
 
-export default function BatchActionBar({ selected, patients, providers, onFlag, onAssignProvider, onExport, onClear }) {
+export default function BatchActionBar({ selected, patients, providers, onFlag, onAssignProvider, onExport, onBulkEdit, onClear }) {
   const [showProviderPicker, setShowProviderPicker] = useState(false);
   const [providerSearch,     setProviderSearch]     = useState('');
 
@@ -80,6 +80,15 @@ export default function BatchActionBar({ selected, patients, providers, onFlag, 
                 </div>
               )}
             </div>
+
+            {onBulkEdit && (
+              <button
+                onClick={() => onBulkEdit(selectedPatients)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold rounded-lg transition-colors"
+              >
+                <Edit3 size={13} /> Bulk Edit
+              </button>
+            )}
 
             <button
               onClick={() => onExport(selectedPatients)}

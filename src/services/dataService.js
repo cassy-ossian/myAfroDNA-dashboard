@@ -406,6 +406,13 @@ export async function updatePatient(patientId, updates) {
   const sbId = getPatientSbId(patientId);
   if (!sbId) return null;
 
+  // Snapshot existing values so we can log field-level changes after the write.
+  const existing = getState().rawPatients.find(p => p.id === patientId);
+  const oldValues = {};
+  if (existing) {
+    for (const k of Object.keys(updates)) oldValues[k] = existing[k];
+  }
+
   // Separate common fields from study_data updates
   const { age, gender, sex, lga, tribe, language, contactPathway, phone, email, manualFlag, ...studyUpdates } = updates;
   const commonUpdates = Object.fromEntries(
@@ -414,7 +421,6 @@ export async function updatePatient(patientId, updates) {
   );
 
   // Merge study_data with existing
-  const existing = getState().rawPatients.find(p => p.id === patientId);
   const currentStudyData = {};
   if (existing) {
     for (const [k, v] of Object.entries(existing)) {
@@ -430,7 +436,92 @@ export async function updatePatient(patientId, updates) {
   setState(s => ({
     rawPatients: s.rawPatients.map(p => p.id === patientId ? raw : p),
   }));
+
+  // Log each changed field as a system note (audit trail). Best-effort; a
+  // failure to insert a note should not fail the update itself.
+  try {
+    await logFieldChanges(patientId, sbId, oldValues, updates);
+  } catch (err) {
+    console.warn('[updatePatient] could not log edit history:', err.message);
+  }
+
   return classifyPatient(raw);
+}
+
+// Format a value for the audit log
+function formatForLog(v) {
+  if (v === null || v === undefined || v === '') return '(empty)';
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+  return String(v);
+}
+
+async function logFieldChanges(appPatientId, patientSbId, oldValues, newValues) {
+  const rows = [];
+  for (const [field, newVal] of Object.entries(newValues)) {
+    const oldVal = oldValues[field];
+    // Only log real changes
+    if (oldVal === newVal) continue;
+    if (oldVal == null && (newVal == null || newVal === '')) continue;
+    rows.push({
+      patient_id: patientSbId,
+      text:       `${field} changed from "${formatForLog(oldVal)}" to "${formatForLog(newVal)}"`,
+      note_type:  'system',
+    });
+  }
+  if (rows.length === 0) return;
+  const { data, error } = await supabase.from('notes').insert(rows).select();
+  if (error) throw error;
+
+  // Push the new notes into the store so the Patient modal shows them immediately
+  const notes = (data ?? []).map(dbNoteToStore);
+  setState(s => ({
+    patientNotes: {
+      ...s.patientNotes,
+      [appPatientId]: [...notes, ...(s.patientNotes[appPatientId] ?? [])],
+    },
+  }));
+}
+
+// Bulk update — one field to the same value across many patients. Uses
+// Promise.all of individual updates so the existing audit log / study_data
+// merge logic runs for each patient.
+export async function bulkUpdatePatients(patientIds, updates) {
+  const results = await Promise.allSettled(
+    patientIds.map(id => updatePatient(id, updates))
+  );
+  const failed = results.filter(r => r.status === 'rejected');
+  if (failed.length > 0) {
+    const first = failed[0].reason;
+    throw new Error(
+      `${failed.length} of ${patientIds.length} update${patientIds.length !== 1 ? 's' : ''} failed: ${first?.message ?? 'unknown error'}`
+    );
+  }
+  return results.length - failed.length;
+}
+
+// Add a new column definition to a study. Appends to column_definitions and
+// refreshes the study in the local cache.
+export async function addStudyColumn(studyId, { key, label, type }) {
+  const { data: studyRow, error: readErr } = await supabase
+    .from('studies').select('column_definitions').eq('id', studyId).single();
+  if (readErr) throw readErr;
+
+  const existing = Array.isArray(studyRow?.column_definitions) ? studyRow.column_definitions : [];
+  if (existing.some(c => c.key === key)) {
+    throw new Error(`Column "${key}" already exists in this study.`);
+  }
+  const next = [...existing, { key, label, type: type ?? 'text' }];
+
+  const { data, error } = await supabase.from('studies')
+    .update({ column_definitions: next })
+    .eq('id', studyId)
+    .select()
+    .single();
+  if (error) throw error;
+
+  const study = dbStudyToStore(data);
+  setState(s => ({ studies: { ...s.studies, [studyId]: study } }));
+  return study;
 }
 
 export async function importPatients(studyId, rows) {
