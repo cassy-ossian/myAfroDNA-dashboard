@@ -209,6 +209,18 @@ export default function StudyView({ study, patients, studies, providers, onSelec
     }
   }, [study, onNavigate]);
 
+  // Column visibility (session-level, stored in Zustand). Must be defined
+  // before any useMemo that depends on `hiddenForStudy`.
+  const hiddenColumnsByStudy    = useAppStore(s => s.hiddenColumnsByStudy);
+  const setHiddenColumnsByStudy = useAppStore(s => s.setHiddenColumnsByStudy);
+  const hiddenForStudy = hiddenColumnsByStudy?.[study?.id] ?? [];
+  const toggleHideColumn = (col) => {
+    const next = hiddenForStudy.includes(col)
+      ? hiddenForStudy.filter(c => c !== col)
+      : [...hiddenForStudy, col];
+    setHiddenColumnsByStudy({ ...(hiddenColumnsByStudy ?? {}), [study.id]: next });
+  };
+
   const columns = useMemo(() => {
     let base;
     if (study?.headers?.length) base = study.headers.filter(h => !HIDDEN_COLS.has(h));
@@ -221,14 +233,6 @@ export default function StudyView({ study, patients, studies, providers, onSelec
     // Filter out session-hidden columns
     return base.filter(k => !hiddenForStudy.includes(k));
   }, [study, patients, hiddenForStudy]);
-
-  const allStudyColumns = useMemo(() => {
-    if (study?.headers?.length) return study.headers.filter(h => !HIDDEN_COLS.has(h));
-    if (patients.length === 0) return ['id'];
-    const allKeys = new Set();
-    for (const p of patients.slice(0, 20)) Object.keys(p).forEach(k => allKeys.add(k));
-    return [...allKeys].filter(k => !HIDDEN_COLS.has(k));
-  }, [study, patients]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return patients;
@@ -307,17 +311,6 @@ export default function StudyView({ study, patients, studies, providers, onSelec
       setAddColError(err.message ?? 'Failed to add column');
       setAddingCol(false);
     }
-  };
-
-  // Column visibility (session-level, stored in Zustand)
-  const hiddenColumnsByStudy = useAppStore(s => s.hiddenColumnsByStudy);
-  const setHiddenColumnsByStudy = useAppStore(s => s.setHiddenColumnsByStudy);
-  const hiddenForStudy = hiddenColumnsByStudy?.[study?.id] ?? [];
-  const toggleHideColumn = (col) => {
-    const next = hiddenForStudy.includes(col)
-      ? hiddenForStudy.filter(c => c !== col)
-      : [...hiddenForStudy, col];
-    setHiddenColumnsByStudy({ ...(hiddenColumnsByStudy ?? {}), [study.id]: next });
   };
 
   // Column header menu state
